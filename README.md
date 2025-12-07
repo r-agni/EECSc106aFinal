@@ -1,1 +1,1 @@
-# EECS 106a Project
+# EECS/ME 106a Project
