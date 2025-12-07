@@ -1,0 +1,26 @@
+# Path Planning System Dependencies
+# Install with: pip install -r requirements.txt
+
+# YOLOv8 for real-time object detection
+ultralytics>=8.0.0
+
+# Deep learning framework (required by ultralytics)
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Image processing
+pillow>=10.0.0
+
+# Scientific computing
+scipy>=1.10.0
+
+# ==========================================
+# Already installed in parent project:
+# - djitellopy>=2.4.0       (drone control)
+# - opencv-python>=4.8.0    (video processing)
+# - numpy>=1.24.0           (numerical operations)
+# - websockets>=12.0        (network communication)
+# ==========================================
+
+# Note: On first run, YOLOv8 will automatically download
+# the yolov8n.pt model file (~6MB) to your local cache.
