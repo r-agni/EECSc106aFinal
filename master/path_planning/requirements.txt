@@ -1,0 +1,16 @@
+# Path Planning System Requirements
+
+# Core dependencies
+opencv-python>=4.8.0
+opencv-contrib-python>=4.8.0
+numpy>=1.24.0
+matplotlib>=3.7.0
+python-dotenv>=1.0.0
+
+# Parent obstacle_avoidance dependencies
+djitellopy>=2.4.0
+ultralytics>=8.0.0
+torch>=2.0.0
+torchvision>=0.15.0
+pillow>=10.0.0
+scipy>=1.10.0
