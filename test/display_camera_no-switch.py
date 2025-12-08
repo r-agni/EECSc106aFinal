@@ -1,31 +1,13 @@
 import cv2
-import cv2.aruco as aruco
 import time
-from pyardrone import ARDrone, at
-
-aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
-aruco_params = aruco.DetectorParameters()
+import cv2.aruco as aruco
 
 def main():
-    print("[INFO] Connecting to AR.Drone...")
-    drone = ARDrone()
-    print("[INFO] Connected.")
-
-    # Wait a bit so navdata/state is sane
-    drone.navdata_ready.wait(timeout=3.0)
-
-    # According to AR.Drone SDK, video:video_channel:
-    # 0 = front camera
-    # 1 = bottom camera
-    # 2/3 = mixed / picture-in-picture modes (varies by firmware)
-    print("[INFO] Switching to BOTTOM camera (video:video_channel = 1)")
-    drone.send(at.CONFIG('video:video_channel', 1))
-
-    # give the drone time to apply the config before we exit
-    time.sleep(1.0)
-    
     stream_url = "tcp://192.168.1.1:5555"
     print(f"[INFO] Opening video stream: {stream_url}")
+
+    aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
+    aruco_params = aruco.DetectorParameters()
 
     # Try forcing the FFmpeg backend explicitly
     cap = cv2.VideoCapture(stream_url, cv2.CAP_FFMPEG)
@@ -42,7 +24,7 @@ def main():
             print("[WARN] Failed to read frame, retrying...")
             time.sleep(0.05)
             continue
-        
+
         # inside the loop, after you read `frame`:
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         corners, ids, rejected = aruco.detectMarkers(gray, aruco_dict, parameters=aruco_params)
