@@ -80,7 +80,7 @@ def main():
 
     # Stop vertical movement → hover hold
     drone.hover()
-    print("\n[INFO] Hovering at ~3 ft. You now have manual controls for up to 60s.")
+    print("\n[INFO] Hovering at ~3 ft. You now have manual controls for up to 120s.")
     print("       Keyboard controls (terminal window in focus):")
     print("         w/s/a/d -> forward/back/left/right")
     print("         r/f     -> up/down")
@@ -108,19 +108,19 @@ def main():
             if is_flying:
                 if key == 'w':
                     print("[CMD] forward")
-                    drone.move(forward=0.25)
+                    drone.move(forward=0.15)
                     last_cmd_time = now
                 elif key == 's':
                     print("[CMD] backward")
-                    drone.move(backward=0.25)
+                    drone.move(backward=0.15)
                     last_cmd_time = now
                 elif key == 'a':
                     print("[CMD] left")
-                    drone.move(left=0.25)
+                    drone.move(left=0.15)
                     last_cmd_time = now
                 elif key == 'd':
                     print("[CMD] right")
-                    drone.move(right=0.25)
+                    drone.move(right=0.15)
                     last_cmd_time = now
                 elif key == 'r':
                     print("[CMD] up")
@@ -148,8 +148,8 @@ def main():
             drone.hover()
             last_cmd_time = time.time()
 
-        # --- Auto-stop after 1 min ---
-        if time.time() - hover_start >= 60:
+        # --- Auto-stop after 2 min ---
+        if time.time() - hover_start >= 120:
             print("[TIMER] 1 minute elapsed → landing.")
             break
 
@@ -203,3 +203,4 @@ if __name__ == "__main__":
         print("\n[KEYBOARD] Ctrl+C → emergency exit & land.")
         cv2.destroyAllWindows()
         sys.exit(0)
+
