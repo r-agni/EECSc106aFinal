@@ -1,3 +1,5 @@
+FFMPEG install website: https://www.ffmpeg.org/download.html
+
 # AR Drone Complete API
 
 A comprehensive Python API wrapper for controlling the Parrot AR.Drone 2.0 with all available commands and functions.
