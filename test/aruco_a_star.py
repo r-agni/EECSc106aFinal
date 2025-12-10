@@ -49,7 +49,24 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 import cv2
+import pyardrone
+from pyardrone import at
+import cv2.aruco as aruco
+import msvcrt  # Windows keyboard input
 
+## -----------------------------
+# Drone Connection Functions
+# -----------------------------
+class ARDroneNoVideo(pyardrone.HelperMixin, pyardrone.ARDroneBase):
+    #High-level helpers + navdata, but no internal video connection.
+    pass
+
+
+def get_key():
+    """Get a single keypress from terminal (Windows)."""
+    if msvcrt.kbhit():
+        return msvcrt.getch().decode('utf-8').lower()
+    return None
 
 # -----------------------------
 # Config
@@ -61,16 +78,15 @@ GRID_RES_M = 0.10            # 10cm cells
 GRID_W = int(math.ceil(WORLD_SIZE_M / GRID_RES_M))
 GRID_H = int(math.ceil(WORLD_SIZE_M / GRID_RES_M))
 
-TAG_ID_START = 1
-TAG_ID_GOAL = 2
-MARKER_SIZE_M = 0.10  # <-- set your real tag size
+TAG_ID_START = 0
+TAG_ID_GOAL = 1
+MARKER_SIZE_M = 0.175  # <-- set your real tag size
 
 # conservative inflation radius for obstacle safety (cells)
 INFLATION_RADIUS_CELLS = 1
 
 # exploration speed & timing placeholders
 EXPLORATION_STEP_TIME = 0.5  # seconds per motion command burst
-
 
 # -----------------------------
 # Minimal drone abstraction
@@ -85,23 +101,76 @@ class DroneInterface:
       - simple planar motion commands
       - OPTIONAL: rough pose estimate in a local frame
     """
+    def __init__(self):
+        self.drone = ARDroneNoVideo()
+        self.is_flying = False
 
     def connect(self):
-        pass
+        print("[INFO] Connecting to AR.Drone (no internal video)...")
+        print("[INFO] Connected.")
+        print("[INFO] Waiting for navdata...")
+        self.drone.navdata_ready.wait(timeout=10.0)
+        if self.drone.navdata_ready.is_set():
+            # Enable navdata demo so battery etc. are easy to read
+            self.drone.send(at.CONFIG("general:navdata_demo", True))
+            time.sleep(0.1)
+            demo = getattr(self.drone.navdata, "demo", None)
+            if demo:
+                print(f"[NAVDATA] Battery: {demo.vbat_flying_percentage}%")
+            else:
+                print("[WARN] Demo navdata not populated yet.")
+        else:
+            print("[WARN] No navdata after 10s, continuing anyway.")
 
     def takeoff(self):
-        pass
+        if not self.is_flying:
+            self.drone.send(at.FTRIM())
+            time.sleep(1)
+            print("TAKEOFF")
+            self.drone.takeoff()
+            self.is_flying = True
+            time.sleep(3)
+            print("[OK] Airborne!")
 
     def land(self):
-        pass
+        if self.is_flying:
+            print("\n[*] Landing before exit...")
+            self.drone.land()
+            time.sleep(3)
+            self.is_flying = False
+
+    def _get_frame_from_channel(self, channel: int, label: str) -> Optional[np.ndarray]:
+        """
+        Internal helper to grab one BGR frame from the given AR.Drone video channel.
+        channel: 0 = front, 1 = bottom
+        """
+        print(f"[INFO] Switching to {label} camera (channel {channel})...")
+        self.drone.send(at.CONFIG("video:video_channel", channel))
+        time.sleep(0.5) 
+
+        stream_url = "tcp://192.168.1.1:5555"
+        print(f"[INFO] Opening {label} video stream: {stream_url}")
+        cap = cv2.VideoCapture(stream_url, cv2.CAP_FFMPEG)
+        if not cap.isOpened():
+            print(f"[!] Could not open {label} video stream. Check stream URL / connection.")
+            cap.release()
+            return None
+        
+        ret, frame = cap.read()
+        cap.release()
+        if not ret or frame is None:
+            print(f"[!] Failed to read frame from {label} stream.")
+            time.sleep(0.1)
+            return None
+        return frame
 
     def get_front_frame(self) -> Optional[np.ndarray]:
         """Return BGR image from front camera."""
-        return None
+        return self._get_frame_from_channel(channel=0, label="FRONT")
 
     def get_bottom_frame(self) -> Optional[np.ndarray]:
         """Return BGR image from bottom camera."""
-        return None
+        return self._get_frame_from_channel(channel=1, label="BOTTOM")
 
     def get_local_pose_xytheta(self) -> Tuple[float, float, float]:
         """
@@ -110,16 +179,62 @@ class DroneInterface:
         If you don't have this, you can still run exploration open-loop,
         but mapping accuracy will suffer.
         """
-        return (0.0, 0.0, 0.0)
+        demo = getattr(self.drone.navdata, "demo", None)
+        if demo is None:
+            return (self.est_x, self.est_y, 0.0)
+
+        # --- Extract velocities from navdata ---
+        vx = demo.vx / 1000.0    # convert mm/s → m/s (forward)
+        vy = demo.vy / 1000.0    # convert mm/s → m/s (rightward)
+
+        # --- Extract yaw angle ---
+        yaw_rad = math.radians(demo.yaw)
+
+        # --- Time integration ---
+        now = time.time()
+        dt = now - self.last_pose_time
+        self.last_pose_time = now
+
+        # Rotate body velocities into world frame
+        world_vx =  vx * math.cos(yaw_rad) - vy * math.sin(yaw_rad)
+        world_vy =  vx * math.sin(yaw_rad) + vy * math.cos(yaw_rad)
+
+        # Integrate position
+        self.est_x += world_vx * dt
+        self.est_y += world_vy * dt
+
+        return (self.est_x, self.est_y, yaw_rad)
 
     def command_velocity_xy_yaw(self, vx: float, vy: float, yaw_rate: float):
         """
         Command planar velocity in m/s and yaw rate in rad/s for a short burst.
         """
-        pass
+        max_lin = 1.0     # max m/s → scaled to full stick deflection
+        max_yaw = 1.0     # max rad/s
+        pitch =  np.clip(vx / max_lin, -1.0, 1.0)    # forward/back
+        roll  =  np.clip(vy / max_lin, -1.0, 1.0)    # right/left
+        yaw   =  np.clip(yaw_rate / max_yaw, -1.0, 1.0)
+        gaz   =  0.0  # no vertical motion
+
+        # send command
+        self.drone.send(
+            at.PCMD(
+                flag=1,
+                roll=roll,
+                pitch=pitch,
+                gaz=gaz,
+                yaw=yaw
+            )
+        )
 
     def stop(self):
         self.command_velocity_xy_yaw(0.0, 0.0, 0.0)
+
+    def shutdown(self): #additional Function to ctrl + C code
+        if self.is_flying:
+            self.land()
+        print("[INFO] Shutting down...")
+        self.drone.close()
 
 
 # -----------------------------
