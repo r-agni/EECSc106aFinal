@@ -333,32 +333,53 @@ def invert_T(T):
 
 def detect_obstacles_front(frame_bgr) -> List[Tuple[float, float]]:
     """
-    Placeholder: returns obstacle points in the DRONE LOCAL frame (x_forward, y_left).
-    YOU SHOULD REPLACE THIS.
+    #Edit: This is a version that replaced the original placeholder function
 
-    Without depth, camera-only obstacle localization is hard.
-    For an MVP you can:
-      - Use a lightweight ML detector + assume a fixed distance band
-      - Or use monocular depth
-      - Or add a small ToF sensor
+    Methodology:
+        - Look for strong edges / blobs in a central lower ROI.
+        - Take the largest contour as "an obstacle".
+        - Assume a fixed depth (e.g. 0.7 m).
+        - Use horizontal image position to estimate lateral offset.
     """
-    # naive heuristic: treat large close-looking blobs near image center as "obstacle ahead"
+    obstacles: List[Tuple[float, float]] = []
     h, w = frame_bgr.shape[:2]
-    roi = frame_bgr[int(h*0.35):int(h*0.85), int(w*0.25):int(w*0.75)]
+
+    # Focus on the central lower part of the image: stuff in front & near ground
+    roi = frame_bgr[int(h * 0.4):int(h * 0.9), :]   # rows [0.4h, 0.9h), all cols
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    blur = cv2.GaussianBlur(gray, (7, 7), 0)
-    edges = cv2.Canny(blur, 50, 120)
-
+    blur = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges = cv2.Canny(blur, 50, 150)
     cnts, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    area = sum(cv2.contourArea(c) for c in cnts)
+    if not cnts:
+        return obstacles
 
-    # If lots of edge activity, assume something in front at ~0.6m
-    obstacles = []
-    if area > 2000:
-        # obstacle point 0.6m forward, centered
-        obstacles.append((0.6, 0.0))
+    # Pick the largest contour as our "main obstacle"
+    largest = max(cnts, key=cv2.contourArea)
+    area = cv2.contourArea(largest)
+    MIN_AREA = 800  # tune this experimentally
+    if area < MIN_AREA:
+        return obstacles
+
+    M = cv2.moments(largest)
+    if M["m00"] == 0:
+        return obstacles
+    # Centroid in ROI coordinates
+    u_roi = M["m10"] / M["m00"]
+    # Convert to full-frame pixel x (ROI covers all columns, so this is same)
+    u = u_roi
+    # Camera intrinsics (must match your actual K!)
+    fx = 600.0
+    cx = 320.0
+    # Assume a fixed forward distance for all detections
+    ASSUMED_DEPTH = 0.7  # meters in front of drone
+    # Image x axis: right is positive.
+    # We want y_left: positive to the LEFT, so flip sign.
+    # y_left ≈ -Z * (u - cx) / fx
+    x_forward = ASSUMED_DEPTH
+    y_left = -ASSUMED_DEPTH * (u - cx) / fx
+
+    obstacles.append((x_forward, y_left))
     return obstacles
-
 
 # -----------------------------
 # Simple A* on grid
