@@ -123,6 +123,11 @@ class PathExecutor:
 
         self.running = False
         self.start_time = None
+        self.waypoint_callback = None  # Callback for waypoint updates
+
+    def set_waypoint_callback(self, callback):
+        """Set callback function for waypoint progress updates"""
+        self.waypoint_callback = callback
 
     def safety_check(self) -> bool:
         """
@@ -216,7 +221,7 @@ class PathExecutor:
             success, msg = self.drone.send_command(command, distance=int(distance))
             if success:
                 self.position.update_from_command(command, {"distance": int(distance)})
-                time.sleep(0.5)
+                time.sleep(1.5)  # Increased from 0.5s to 1.5s for better IMU stability
             return success
 
         # Then handle horizontal movement
@@ -237,10 +242,14 @@ class PathExecutor:
             # If we need to turn significantly, rotate first
             if abs(angle_diff) > 15:  # 15 degree threshold
                 rotation = min(abs(angle_diff), 90)  # Max 90 degrees per step
-                rotation = max(rotation, 30)  # Minimum 30 degrees to avoid too many small rotations
+                rotation = max(rotation, 15)  # Minimum 15 degrees (reduced from 30 for IMU stability)
 
                 print(f"[ROTATE] Current yaw: {self.position.yaw:.1f}°, Target angle: {target_angle:.1f}°, "
                       f"Need to rotate: {angle_diff:.1f}°, Will rotate: {rotation:.1f}°")
+                
+                # Ensure drone is stable before rotation
+                print("[ROTATE] Stabilizing before rotation...")
+                time.sleep(1.5)  # Wait for drone to stabilize
 
                 if angle_diff > 0:
                     success, msg = self.drone.send_command("rotate_ccw", degrees=int(rotation))
@@ -252,7 +261,8 @@ class PathExecutor:
                         self.position.update_from_command("rotate_cw", {"degrees": int(rotation)})
 
                 # Wait longer for rotation to complete and IMU to stabilize
-                time.sleep(1.0)
+                print("[ROTATE] Waiting for IMU to stabilize after rotation...")
+                time.sleep(2.5)  # Increased from 1.0s to 2.5s for IMU stability
                 return success
 
             # Move forward toward target
@@ -262,7 +272,7 @@ class PathExecutor:
             success, msg = self.drone.send_command("move_forward", distance=int(distance))
             if success:
                 self.position.update_from_command("move_forward", {"distance": int(distance)})
-                time.sleep(0.5)
+                time.sleep(1.5)  # Increased from 0.5s to 1.5s for better IMU stability
             return success
 
         return True
@@ -291,6 +301,10 @@ class PathExecutor:
         print(f"Path: {waypoints}")
         print("="*60 + "\n")
 
+        # Notify dashboard of waypoints
+        if self.waypoint_callback:
+            self.waypoint_callback(waypoints, 0)
+
         try:
             # First waypoint - takeoff if needed
             if waypoints[0][2] > 0:
@@ -309,6 +323,10 @@ class PathExecutor:
                 if not self.running:
                     print("\n[!] Path execution stopped")
                     break
+
+                # Notify waypoint progress
+                if self.waypoint_callback:
+                    self.waypoint_callback(waypoints, i)
 
                 print(f"\n{'='*60}")
                 print(f"WAYPOINT {i+1}/{len(waypoints)}: ({waypoint[0]:.0f}, {waypoint[1]:.0f}, {waypoint[2]:.0f})")

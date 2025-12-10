@@ -25,6 +25,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
         'target_pos': {'x': 0, 'y': 0, 'theta': 0},
         'trajectory': [],
         'obstacles': [],
+        'waypoints': [],  # List of (x, y, z) waypoint tuples
+        'current_waypoint_index': 0,  # Current target waypoint
         'status': 'READY',
         'stats': {}
     }
@@ -57,124 +59,85 @@ class DashboardHandler(BaseHTTPRequestHandler):
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
-            background: #1a1a1a;
+            background: #000;
             color: #fff;
-            padding: 10px;
+            overflow: hidden;
         }
         .header {
             text-align: center;
-            padding: 15px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 10px;
-            margin-bottom: 10px;
+            padding: 10px;
+            background: #000;
+            border-bottom: 2px solid #667eea;
         }
-        .header h1 { font-size: 24px; margin-bottom: 5px; }
-        .status { font-size: 14px; color: #ffd700; }
+        .header h1 { 
+            font-size: 20px; 
+            margin-bottom: 5px;
+            color: #667eea;
+        }
+        .status { 
+            font-size: 14px; 
+            color: #ffd700;
+            font-weight: bold;
+        }
         .container {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            height: calc(100vh - 120px);
+            gap: 0;
+            height: calc(100vh - 70px);
+            background: #000;
         }
         .panel {
-            background: #2d2d2d;
-            border-radius: 10px;
-            padding: 15px;
+            background: #000;
+            border: 1px solid #333;
             overflow: hidden;
+            display: flex;
+            flex-direction: column;
         }
-        .panel h2 {
-            font-size: 16px;
-            margin-bottom: 10px;
+        .panel-header {
+            padding: 8px;
+            background: #111;
+            border-bottom: 1px solid #667eea;
+            font-size: 14px;
+            font-weight: bold;
             color: #667eea;
-            border-bottom: 2px solid #667eea;
-            padding-bottom: 5px;
         }
-        #video-panel img {
+        .panel-content {
+            flex: 1;
+            overflow: hidden;
+            position: relative;
+        }
+        #video-feed {
             width: 100%;
-            height: calc(100% - 35px);
+            height: 100%;
             object-fit: contain;
             background: #000;
-            border-radius: 5px;
         }
         #map-canvas {
             width: 100%;
-            height: calc(100% - 35px);
-            background: #1a1a1a;
-            border-radius: 5px;
+            height: 100%;
+            background: #000;
         }
-        #stats {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-top: 10px;
-        }
-        .stat-box {
-            background: #3d3d3d;
-            padding: 10px;
-            border-radius: 5px;
-            text-align: center;
-        }
-        .stat-label { font-size: 11px; color: #aaa; }
-        .stat-value { font-size: 18px; font-weight: bold; color: #ffd700; }
-        .obstacle-list {
-            max-height: 150px;
-            overflow-y: auto;
-            margin-top: 10px;
-        }
-        .obstacle-item {
-            padding: 5px;
-            margin: 5px 0;
-            background: #3d3d3d;
-            border-radius: 3px;
-            font-size: 12px;
-        }
-        .threat-high { border-left: 4px solid #ff4444; }
-        .threat-medium { border-left: 4px solid #ffaa44; }
-        .threat-low { border-left: 4px solid #44ff44; }
     </style>
 </head>
 <body>
     <div class="header">
-        <h1>🚁 Tello Autonomous Navigation Dashboard</h1>
-        <div class="status" id="status">Status: INITIALIZING</div>
+        <h1>TELLO AUTONOMOUS NAVIGATION</h1>
+        <div class="status" id="status">INITIALIZING</div>
     </div>
 
     <div class="container">
-        <div class="panel" id="video-panel">
-            <h2>📹 Live Video Feed</h2>
-            <img id="video-feed" src="" alt="Video Stream">
-        </div>
-
         <div class="panel">
-            <h2>🗺️ Navigation Map</h2>
-            <canvas id="map-canvas"></canvas>
-        </div>
-
-        <div class="panel">
-            <h2>📊 Statistics</h2>
-            <div id="stats">
-                <div class="stat-box">
-                    <div class="stat-label">Position</div>
-                    <div class="stat-value" id="position">0, 0</div>
-                </div>
-                <div class="stat-box">
-                    <div class="stat-label">Altitude</div>
-                    <div class="stat-value" id="altitude">0 cm</div>
-                </div>
-                <div class="stat-box">
-                    <div class="stat-label">Heading</div>
-                    <div class="stat-value" id="heading">0°</div>
-                </div>
-                <div class="stat-box">
-                    <div class="stat-label">Distance to Target</div>
-                    <div class="stat-value" id="distance">-- cm</div>
-                </div>
+            <div class="panel-header">LIVE VIDEO FEED</div>
+            <div class="panel-content">
+                <img id="video-feed" src="" alt="Video Stream">
             </div>
         </div>
 
         <div class="panel">
-            <h2>🚧 Detected Obstacles</h2>
-            <div id="obstacle-list" class="obstacle-list"></div>
+            <div class="panel-header">NAVIGATION MAP</div>
+            <div class="panel-content">
+                <canvas id="map-canvas"></canvas>
+            </div>
         </div>
     </div>
 
@@ -206,23 +169,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 const state = await response.json();
 
                 // Update status
-                document.getElementById('status').textContent = 'Status: ' + state.status;
-
-                // Update stats
-                const pos = state.current_pos;
-                document.getElementById('position').textContent =
-                    `${pos.x.toFixed(0)}, ${pos.y.toFixed(0)}`;
-                document.getElementById('altitude').textContent = `${pos.z.toFixed(0)} cm`;
-                document.getElementById('heading').textContent = `${pos.yaw.toFixed(0)}°`;
-
-                // Calculate distance to target
-                const dx = state.target_pos.x - pos.x;
-                const dy = state.target_pos.y - pos.y;
-                const dist = Math.sqrt(dx*dx + dy*dy);
-                document.getElementById('distance').textContent = `${dist.toFixed(0)} cm`;
-
-                // Update obstacles
-                updateObstacleList(state.obstacles);
+                document.getElementById('status').textContent = state.status;
 
                 // Draw map
                 drawMap(state);
@@ -232,19 +179,6 @@ class DashboardHandler(BaseHTTPRequestHandler):
             }
         }
 
-        function updateObstacleList(obstacles) {
-            const list = document.getElementById('obstacle-list');
-            if (obstacles.length === 0) {
-                list.innerHTML = '<div style="text-align:center;color:#666;padding:20px;">No obstacles detected</div>';
-                return;
-            }
-
-            list.innerHTML = obstacles.map(obs => `
-                <div class="obstacle-item threat-${obs.threat_level}">
-                    <strong>${obs.class}</strong> - ${obs.distance_m.toFixed(1)}m (${obs.position})
-                </div>
-            `).join('');
-        }
 
         function drawMap(state) {
             const w = canvas.width;
@@ -254,59 +188,90 @@ class DashboardHandler(BaseHTTPRequestHandler):
             ctx.fillStyle = '#1a1a1a';
             ctx.fillRect(0, 0, w, h);
 
-            // Calculate scale
-            const maxX = Math.max(state.target_pos.x, 300);
-            const maxY = Math.max(state.target_pos.y, 300);
-            const scale = Math.min(w / (maxX * 1.5), h / (maxY * 1.5));
-            const offsetX = w / 2 - (state.target_pos.x / 2) * scale;
-            const offsetY = h / 2 - (state.target_pos.y / 2) * scale;
+            // Calculate scale to fit everything with padding
+            const maxX = Math.max(Math.abs(state.target_pos.x), Math.abs(state.current_pos.x), 300);
+            const maxY = Math.max(Math.abs(state.target_pos.y), Math.abs(state.current_pos.y), 300);
+            const padding = 50;
+            const scale = Math.min((w - padding * 2) / (maxX * 2), (h - padding * 2) / (maxY * 2));
+            const centerX = w / 2;
+            const centerY = h / 2;
 
             function toScreen(x, y) {
                 return {
-                    x: offsetX + x * scale,
-                    y: offsetY + (maxY - y) * scale  // Flip Y
+                    x: centerX + x * scale,
+                    y: centerY - y * scale  // Flip Y (screen Y increases downward)
                 };
             }
 
-            // Grid
-            ctx.strokeStyle = '#333';
+            // Draw grid
+            ctx.strokeStyle = '#1a1a1a';
             ctx.lineWidth = 1;
-            for (let i = 0; i <= maxX; i += 50) {
-                const p = toScreen(i, 0);
+            const gridSize = 50;
+            
+            // Vertical lines
+            for (let x = -maxX; x <= maxX; x += gridSize) {
+                const p1 = toScreen(x, -maxY);
+                const p2 = toScreen(x, maxY);
                 ctx.beginPath();
-                ctx.moveTo(p.x, 0);
-                ctx.lineTo(p.x, h);
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
                 ctx.stroke();
             }
-            for (let i = 0; i <= maxY; i += 50) {
-                const p = toScreen(0, i);
+            
+            // Horizontal lines
+            for (let y = -maxY; y <= maxY; y += gridSize) {
+                const p1 = toScreen(-maxX, y);
+                const p2 = toScreen(maxX, y);
                 ctx.beginPath();
-                ctx.moveTo(0, p.y);
-                ctx.lineTo(w, p.y);
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
                 ctx.stroke();
             }
+            
+            // Draw axes
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            // X axis
+            const xAxis1 = toScreen(-maxX, 0);
+            const xAxis2 = toScreen(maxX, 0);
+            ctx.beginPath();
+            ctx.moveTo(xAxis1.x, xAxis1.y);
+            ctx.lineTo(xAxis2.x, xAxis2.y);
+            ctx.stroke();
+            // Y axis
+            const yAxis1 = toScreen(0, -maxY);
+            const yAxis2 = toScreen(0, maxY);
+            ctx.beginPath();
+            ctx.moveTo(yAxis1.x, yAxis1.y);
+            ctx.lineTo(yAxis2.x, yAxis2.y);
+            ctx.stroke();
 
-            // Start position
+            // Draw start position (origin)
             const start = toScreen(0, 0);
-            ctx.fillStyle = '#44ff44';
+            ctx.fillStyle = '#00ff00';
             ctx.beginPath();
-            ctx.arc(start.x, start.y, 8, 0, Math.PI * 2);
+            ctx.arc(start.x, start.y, 10, 0, Math.PI * 2);
             ctx.fill();
+            ctx.fillStyle = '#000';
+            ctx.font = 'bold 12px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('START', start.x, start.y + 4);
 
-            // Target position
+            // Draw target position
             const target = toScreen(state.target_pos.x, state.target_pos.y);
-            ctx.fillStyle = '#ff4444';
+            ctx.fillStyle = '#ff0000';
             ctx.beginPath();
-            ctx.moveTo(target.x, target.y - 12);
-            ctx.lineTo(target.x - 10, target.y + 8);
-            ctx.lineTo(target.x + 10, target.y + 8);
-            ctx.closePath();
+            ctx.arc(target.x, target.y, 10, 0, Math.PI * 2);
             ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 12px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('TARGET', target.x, target.y + 4);
 
-            // Trajectory
+            // Draw trajectory path
             if (state.trajectory.length > 1) {
-                ctx.strokeStyle = '#44ff44';
-                ctx.lineWidth = 2;
+                ctx.strokeStyle = '#00ffff';
+                ctx.lineWidth = 3;
                 ctx.beginPath();
                 const first = toScreen(state.trajectory[0][0], state.trajectory[0][1]);
                 ctx.moveTo(first.x, first.y);
@@ -317,35 +282,136 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 ctx.stroke();
             }
 
-            // Obstacles
+            // Draw obstacles with age-based fading
             state.obstacles.forEach(obs => {
-                const p = toScreen(obs.x, obs.y);
-                const colors = {high: '#ff4444', medium: '#ffaa44', low: '#ffff44'};
-                ctx.fillStyle = colors[obs.threat_level] || '#888';
-                ctx.globalAlpha = 0.3;
+                const p = toScreen(obs.x || 0, obs.y || 0);
+                const colors = {high: '#ff0000', medium: '#ff8800', low: '#ffff00'};
+                const baseColor = colors[obs.threat_level] || '#888';
+
+                // Calculate opacity based on age (fade over 5 seconds)
+                const now = Date.now() / 1000;
+                const age = obs.timestamp ? (now - obs.timestamp) : 0;
+                const maxAge = 5.0;
+                const opacity = Math.max(0.2, 1.0 - (age / maxAge));
+
+                // Draw obstacle circle
+                ctx.globalAlpha = opacity * 0.5;
+                ctx.fillStyle = baseColor;
                 ctx.beginPath();
-                ctx.arc(p.x, p.y, obs.width_m * 50 * scale, 0, Math.PI * 2);
+                const radius = (obs.width_m || 0.5) * 100 * scale;
+                ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
                 ctx.fill();
+
+                // Draw border
+                ctx.globalAlpha = opacity;
+                ctx.strokeStyle = baseColor;
+                ctx.lineWidth = 2;
+                ctx.stroke();
                 ctx.globalAlpha = 1;
+
+                // Label with class and distance
+                ctx.fillStyle = '#fff';
+                ctx.font = '10px Arial';
+                ctx.textAlign = 'center';
+                const label = `${obs.class || 'OBS'} (${obs.distance_m?.toFixed(1)}m)`;
+                ctx.fillText(label, p.x, p.y - radius - 5);
+
+                // Age indicator for old obstacles
+                if (age > 2.0) {
+                    ctx.fillStyle = '#888';
+                    ctx.font = '8px Arial';
+                    ctx.fillText(`${age.toFixed(0)}s ago`, p.x, p.y + radius + 12);
+                }
             });
 
-            // Current position
+            // Draw waypoints and planned path
+            if (state.waypoints && state.waypoints.length > 0) {
+                // Draw dashed line connecting waypoints
+                ctx.strokeStyle = '#00aaff';
+                ctx.setLineDash([10, 5]);
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                for (let i = 0; i < state.waypoints.length; i++) {
+                    const wp = state.waypoints[i];
+                    const p = toScreen(wp[0], wp[1]);
+                    if (i === 0) ctx.moveTo(p.x, p.y);
+                    else ctx.lineTo(p.x, p.y);
+                }
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // Draw waypoint markers
+                state.waypoints.forEach((wp, idx) => {
+                    const p = toScreen(wp[0], wp[1]);
+                    const currentIdx = state.current_waypoint_index || 0;
+
+                    // Color code: green=completed, blue=current, gray=upcoming
+                    if (idx < currentIdx) {
+                        ctx.fillStyle = '#00ff0088';  // Completed
+                    } else if (idx === currentIdx) {
+                        ctx.fillStyle = '#00aaff';  // Current
+                    } else {
+                        ctx.fillStyle = '#888888';  // Upcoming
+                    }
+
+                    // Draw circle
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+
+                    // Draw waypoint number
+                    ctx.fillStyle = '#fff';
+                    ctx.font = 'bold 10px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText((idx + 1).toString(), p.x, p.y + 3);
+
+                    // Draw altitude label
+                    ctx.fillStyle = '#00aaff';
+                    ctx.font = '9px Arial';
+                    ctx.fillText(`z=${wp[2]}cm`, p.x, p.y - 15);
+                });
+            }
+
+            // Draw current drone position
             const curr = toScreen(state.current_pos.x, state.current_pos.y);
-            ctx.fillStyle = '#4477ff';
+
+            // Drone body
+            ctx.fillStyle = '#0088ff';
             ctx.beginPath();
-            ctx.arc(curr.x, curr.y, 10, 0, Math.PI * 2);
+            ctx.arc(curr.x, curr.y, 12, 0, Math.PI * 2);
             ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
 
             // Heading arrow
-            const yawRad = (90 - state.current_pos.yaw) * Math.PI / 180;
-            const arrowLen = 30;
-            ctx.strokeStyle = '#4477ff';
-            ctx.lineWidth = 3;
+            const yawRad = state.current_pos.yaw * Math.PI / 180;
+            const arrowLen = 35;
+            ctx.strokeStyle = '#ffff00';
+            ctx.lineWidth = 4;
             ctx.beginPath();
             ctx.moveTo(curr.x, curr.y);
-            ctx.lineTo(curr.x + Math.cos(yawRad) * arrowLen,
-                      curr.y - Math.sin(yawRad) * arrowLen);
+            ctx.lineTo(curr.x + Math.sin(yawRad) * arrowLen,
+                      curr.y - Math.cos(yawRad) * arrowLen);
             ctx.stroke();
+            
+            // Arrow head
+            ctx.fillStyle = '#ffff00';
+            ctx.beginPath();
+            const headX = curr.x + Math.sin(yawRad) * arrowLen;
+            const headY = curr.y - Math.cos(yawRad) * arrowLen;
+            ctx.arc(headX, headY, 5, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Position label
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 11px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(`(${state.current_pos.x.toFixed(0)}, ${state.current_pos.y.toFixed(0)})`, 
+                        curr.x, curr.y + 25);
         }
 
         // Update every 100ms
@@ -443,7 +509,8 @@ class WebDashboard:
                 'width_m': width_m,
                 'threat_level': threat_level,
                 'class': obj_class,
-                'position': 'center'  # Simplified
+                'position': 'center',  # Simplified
+                'timestamp': time.time()  # Track detection time
             })
             # Keep only recent obstacles
             if len(obs_list) > 20:
@@ -453,3 +520,15 @@ class WebDashboard:
         """Update status"""
         with DashboardHandler.state_lock:
             DashboardHandler.navigation_state['status'] = status
+
+    def update_waypoints(self, waypoints, current_index=0):
+        """
+        Update waypoint visualization.
+
+        Args:
+            waypoints: List of (x, y, z) tuples representing waypoints
+            current_index: Index of current target waypoint
+        """
+        with DashboardHandler.state_lock:
+            DashboardHandler.navigation_state['waypoints'] = waypoints
+            DashboardHandler.navigation_state['current_waypoint_index'] = current_index

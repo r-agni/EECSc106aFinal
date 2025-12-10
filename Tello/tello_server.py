@@ -238,17 +238,43 @@ class DroneController:
 
                 elif command == "rotate_cw":
                     degrees = params.get("degrees", 30)
-                    # Add small delay before rotation to ensure IMU is stable
-                    time.sleep(0.3)
-                    self.tello.rotate_clockwise(degrees)
-                    msg = f"Rotated clockwise {degrees}°"
+                    # Add delay before rotation to ensure IMU is stable
+                    time.sleep(1.0)  # Increased from 0.3s to 1.0s
+                    
+                    # Retry logic for IMU errors
+                    max_retries = 3
+                    for attempt in range(max_retries):
+                        try:
+                            self.tello.rotate_clockwise(degrees)
+                            msg = f"Rotated clockwise {degrees}°"
+                            break
+                        except Exception as e:
+                            error_str = str(e).lower()
+                            if "no valid imu" in error_str and attempt < max_retries - 1:
+                                print(f"[!] IMU not ready (attempt {attempt + 1}/{max_retries}), waiting 3s...")
+                                time.sleep(3.0)  # Wait for IMU to stabilize
+                            else:
+                                raise  # Re-raise if not IMU error or final attempt
 
                 elif command == "rotate_ccw":
                     degrees = params.get("degrees", 30)
-                    # Add small delay before rotation to ensure IMU is stable
-                    time.sleep(0.3)
-                    self.tello.rotate_counter_clockwise(degrees)
-                    msg = f"Rotated counter-clockwise {degrees}°"
+                    # Add delay before rotation to ensure IMU is stable
+                    time.sleep(1.0)  # Increased from 0.3s to 1.0s
+                    
+                    # Retry logic for IMU errors
+                    max_retries = 3
+                    for attempt in range(max_retries):
+                        try:
+                            self.tello.rotate_counter_clockwise(degrees)
+                            msg = f"Rotated counter-clockwise {degrees}°"
+                            break
+                        except Exception as e:
+                            error_str = str(e).lower()
+                            if "no valid imu" in error_str and attempt < max_retries - 1:
+                                print(f"[!] IMU not ready (attempt {attempt + 1}/{max_retries}), waiting 3s...")
+                                time.sleep(3.0)  # Wait for IMU to stabilize
+                            else:
+                                raise  # Re-raise if not IMU error or final attempt
 
                 elif command == "emergency":
                     self.tello.emergency()
@@ -428,6 +454,7 @@ class VideoStreamHandler:
         self.http_port = http_port
         self.http_server: Optional[ThreadedHTTPServer] = None
         self.http_thread: Optional[threading.Thread] = None
+        self.overlay_processor = None  # Callback for frame overlays
 
     def start_stream(self):
         """Begin video capture in separate thread."""
@@ -468,11 +495,19 @@ class VideoStreamHandler:
 
             # Update HTTP frame queue (for web streaming)
             if self.enable_http_stream and not self.http_frame_queue.full():
+                # Apply overlays if processor is set
+                display_frame = frame.copy()
+                if self.overlay_processor:
+                    try:
+                        display_frame = self.overlay_processor(display_frame)
+                    except Exception as e:
+                        print(f"[!] Overlay error: {e}")
+
                 try:
                     self.http_frame_queue.get_nowait()
                 except Empty:
                     pass
-                self.http_frame_queue.put(frame.copy())
+                self.http_frame_queue.put(display_frame)
 
             cv2.imshow("Tello Stream", frame)
 
@@ -490,6 +525,11 @@ class VideoStreamHandler:
             return self.keyboard_queue.get_nowait()
         except Empty:
             return None
+
+    def set_overlay_processor(self, processor_func):
+        """Set function to process frames with overlays before streaming"""
+        self.overlay_processor = processor_func
+        print("[+] Video overlay processor enabled")
 
     def _start_http_server(self):
         """Start HTTP streaming server in separate thread"""

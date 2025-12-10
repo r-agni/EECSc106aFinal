@@ -21,6 +21,7 @@ from obstacle_avoidance.path_executor import PathExecutor, PositionEstimator
 from obstacle_avoidance.config import Config
 from obstacle_avoidance.obstacle_detector import ObstacleDetector
 from obstacle_avoidance.video_processor import VideoProcessor
+from obstacle_avoidance.path_planner import generate_waypoints_with_rrt
 from pid_controller import PositionController
 from visualization.web_dashboard import WebDashboard
 from visualization.nav_wrapper import VisualizationWrapper
@@ -91,6 +92,27 @@ class SimpleNavigator:
         self.detector = ObstacleDetector(self.config)
         self.video_proc = VideoProcessor(self.video_handler)
 
+        # Setup video overlays for bounding boxes
+        detected_obstacles = []  # Track latest detections for overlay
+
+        def overlay_processor(frame):
+            """Draw bounding boxes on video frames"""
+            # Run detection (throttled by detector config)
+            obstacles = self.detector.process_frame(frame)
+            if obstacles:
+                detected_obstacles.clear()
+                detected_obstacles.extend(obstacles)
+
+            # Draw bounding boxes
+            if detected_obstacles:
+                frame = self.detector.draw_detections(frame, detected_obstacles)
+
+            return frame
+
+        # Attach overlay processor to video handler
+        self.video_handler.set_overlay_processor(overlay_processor)
+        print("[+] Video overlays enabled - bounding boxes will appear on stream")
+
         print("\n" + "="*60)
         print("SYSTEM READY")
         print("="*60)
@@ -115,18 +137,24 @@ class SimpleNavigator:
         """
         print(f"\n[TARGET] Position: ({x:.0f}, {y:.0f}) cm, Orientation: {theta:.0f}°, Altitude: {altitude:.0f}cm")
 
-        # Create waypoints:
-        # 1. Takeoff to altitude
-        # 2. Navigate to (x, y) at altitude
-        # 3. Rotate to final orientation
-        # 4. Land
-        waypoints = [
-            (0, 0, altitude),           # Takeoff
-            (x, y, altitude),           # Navigate to target
-            (x, y, 0)                   # Land at target
-        ]
+        # Generate waypoints using RRT algorithm
+        # This will create an optimized path avoiding any known obstacles
+        print("\n[PLANNING] Generating waypoints using RRT algorithm...")
 
-        print(f"\n[PLAN] Waypoints:")
+        # For initial planning, no obstacles are known
+        # RRT will still create intermediate waypoints for better visualization
+        obstacles = []  # Empty for now - obstacles detected during flight
+
+        waypoints = generate_waypoints_with_rrt(
+            start_x=0,
+            start_y=0,
+            goal_x=x,
+            goal_y=y,
+            altitude=altitude,
+            obstacles=obstacles
+        )
+
+        print(f"\n[PLAN] Generated {len(waypoints)} waypoints:")
         for i, wp in enumerate(waypoints):
             print(f"  {i+1}. ({wp[0]:.0f}, {wp[1]:.0f}, {wp[2]:.0f}) cm")
 

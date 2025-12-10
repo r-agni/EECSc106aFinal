@@ -42,6 +42,13 @@ class VisualizationWrapper:
         # Update status (web dashboard doesn't need planned path)
         self.live_map.set_status("NAVIGATING")
 
+        # Setup waypoint tracking callback
+        def waypoint_update_callback(waypoints, current_idx):
+            if hasattr(self.live_map, 'update_waypoints'):
+                self.live_map.update_waypoints(waypoints, current_idx)
+
+        self.executor.set_waypoint_callback(waypoint_update_callback)
+
         # Wrap the executor's movement functions
         original_move = self.executor.move_toward_waypoint
         self.executor.move_toward_waypoint = self._wrapped_move_toward_waypoint
