@@ -105,6 +105,10 @@ class DroneInterface:
         self.drone = ARDroneNoVideo()
         self.is_flying = False
 
+        self.est_x = 0.0
+        self.est_y = 0.0
+        self.last_pose_time = time.time()
+
     def connect(self):
         print("[INFO] Connecting to AR.Drone (no internal video)...")
         print("[INFO] Connected.")
