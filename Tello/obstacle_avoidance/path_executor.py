@@ -214,6 +214,10 @@ class PathExecutor:
             distance = min(abs(dz), self.config.MAX_STEP_DISTANCE)
             distance = max(distance, self.config.MIN_STEP_DISTANCE)
 
+            # Use smaller steps when IMU is disabled for better dead reckoning accuracy
+            if not self.use_imu:
+                distance = min(distance, 30)  # Max 30cm per step without IMU
+
             if dz > 0:
                 command = "move_up"
             else:
@@ -245,7 +249,12 @@ class PathExecutor:
             rotation_threshold = 25 if not self.use_imu else 15
             if abs(angle_diff) > rotation_threshold:
                 rotation = min(abs(angle_diff), 90)  # Max 90 degrees per step
-                rotation = max(rotation, 15)  # Minimum 15 degrees (reduced from 30 for IMU stability)
+
+                # Use smaller rotation increments when IMU is disabled
+                if not self.use_imu:
+                    rotation = min(rotation, 45)  # Max 45 degrees per step without IMU
+
+                rotation = max(rotation, 15)  # Minimum 15 degrees
 
                 imu_status = "IMU ENABLED" if self.use_imu else "DEAD RECKONING"
                 print(f"[ROTATE] ({imu_status}) Current yaw: {self.position.yaw:.1f}°, Target angle: {target_angle:.1f}°, "
@@ -272,6 +281,10 @@ class PathExecutor:
             # Move forward toward target
             distance = min(horizontal_dist, self.config.MAX_STEP_DISTANCE)
             distance = max(distance, self.config.MIN_STEP_DISTANCE)
+
+            # Use smaller steps when IMU is disabled for better dead reckoning accuracy
+            if not self.use_imu:
+                distance = min(distance, 30)  # Max 30cm per step without IMU
 
             success, msg = self.drone.send_command("move_forward", distance=int(distance))
             if success:
