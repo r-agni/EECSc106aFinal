@@ -211,12 +211,13 @@ class PathExecutor:
 
         # Prioritize vertical movement first (safer)
         if abs(dz) > self.config.WAYPOINT_TOLERANCE:
-            distance = min(abs(dz), self.config.MAX_STEP_DISTANCE)
+            # Use very slow vertical movements for better stability
+            distance = min(abs(dz), 25)  # Max 25cm per step (very slow)
             distance = max(distance, self.config.MIN_STEP_DISTANCE)
 
-            # Use smaller steps when IMU is disabled for better dead reckoning accuracy
+            # Even slower when IMU is disabled
             if not self.use_imu:
-                distance = min(distance, 30)  # Max 30cm per step without IMU
+                distance = min(distance, 20)  # Max 20cm per step without IMU
 
             if dz > 0:
                 command = "move_up"
@@ -226,7 +227,7 @@ class PathExecutor:
             success, msg = self.drone.send_command(command, distance=int(distance))
             if success:
                 self.position.update_from_command(command, {"distance": int(distance)})
-                time.sleep(1.5)  # Increased from 0.5s to 1.5s for better IMU stability
+                time.sleep(2.0)  # Wait longer for stability
             return success
 
         # Then handle horizontal movement
@@ -248,11 +249,12 @@ class PathExecutor:
             # Use larger tolerance when IMU is disabled to avoid rotation loops
             rotation_threshold = 25 if not self.use_imu else 15
             if abs(angle_diff) > rotation_threshold:
-                rotation = min(abs(angle_diff), 90)  # Max 90 degrees per step
+                # Very slow rotations - max 30 degrees per step
+                rotation = min(abs(angle_diff), 30)  # Max 30 degrees per step (very slow)
 
-                # Use smaller rotation increments when IMU is disabled
+                # Even slower when IMU is disabled
                 if not self.use_imu:
-                    rotation = min(rotation, 45)  # Max 45 degrees per step without IMU
+                    rotation = min(rotation, 25)  # Max 25 degrees per step without IMU
 
                 rotation = max(rotation, 15)  # Minimum 15 degrees
 
@@ -262,7 +264,7 @@ class PathExecutor:
                 
                 # Ensure drone is stable before rotation
                 print("[ROTATE] Stabilizing before rotation...")
-                time.sleep(1.5)  # Wait for drone to stabilize
+                time.sleep(2.0)  # Wait longer for drone to stabilize
 
                 if angle_diff > 0:
                     success, msg = self.drone.send_command("rotate_ccw", degrees=int(rotation))
@@ -273,23 +275,24 @@ class PathExecutor:
                     if success:
                         self.position.update_from_command("rotate_cw", {"degrees": int(rotation)})
 
-                # Wait longer for rotation to complete and IMU to stabilize
-                print("[ROTATE] Waiting for IMU to stabilize after rotation...")
-                time.sleep(2.5)  # Increased from 1.0s to 2.5s for IMU stability
+                # Wait much longer for rotation to complete and stabilize
+                print("[ROTATE] Waiting for stabilization after rotation...")
+                time.sleep(3.0)  # Wait 3 seconds for full stabilization
                 return success
 
             # Move forward toward target
-            distance = min(horizontal_dist, self.config.MAX_STEP_DISTANCE)
+            # Use very slow horizontal movements for better accuracy
+            distance = min(horizontal_dist, 25)  # Max 25cm per step (very slow)
             distance = max(distance, self.config.MIN_STEP_DISTANCE)
 
-            # Use smaller steps when IMU is disabled for better dead reckoning accuracy
+            # Even slower when IMU is disabled
             if not self.use_imu:
-                distance = min(distance, 30)  # Max 30cm per step without IMU
+                distance = min(distance, 20)  # Max 20cm per step without IMU
 
             success, msg = self.drone.send_command("move_forward", distance=int(distance))
             if success:
                 self.position.update_from_command("move_forward", {"distance": int(distance)})
-                time.sleep(1.5)  # Increased from 0.5s to 1.5s for better IMU stability
+                time.sleep(2.0)  # Wait longer for stability
             return success
 
         return True
