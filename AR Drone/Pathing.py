@@ -5,6 +5,8 @@ import numpy as np
 import pyardrone
 from pyardrone import at
 import cv2.aruco as aruco
+
+import matplotlib.pyplot as plt
 class ARDroneNoVideo(pyardrone.HelperMixin, pyardrone.ARDroneBase):
     #High-level helpers + navdata, but no internal video connection.
     pass
@@ -20,7 +22,9 @@ def get_key():
     return None
 
 horiz_duration = 3.0   # seconds for ~2m sideways
-forward_duration = 1.5 # seconds for ~1m forward
+speed = 0.05
+ROW_SPACING_M = 0.02     # 10 cm between sweeps
+forward_duration = ROW_SPACING_M / speed
 def current_segment_duration(seg_name):
     if seg_name in ("RIGHT", "LEFT"):
         return horiz_duration
@@ -70,12 +74,10 @@ def main():
 
     print("[*] Press 'q' in the console or OpenCV window to quit.")
     print("[*] Showing camera feed and wall detection overlay...")
-
-    is_flying = False
-    speed = 0.05        
+    #-------------- initializations + Takeoff -------------
+    is_flying = False        
     segments = ["RIGHT", "FORWARD", "LEFT", "FORWARD"]
     segment_index = 0
-    #segment_start_time = time.time()
 
     drone.send(at.FTRIM())
     time.sleep(1)
@@ -85,8 +87,51 @@ def main():
     time.sleep(3)
     print("[OK] Airborne!")
 
+    est_x = 0.0
+    est_y = 0.0
+    path_x = [est_x]
+    path_y = [est_y]
+    last_pose_time = time.time()
     segment_start_time = time.time()
+    start_found = False
     try:
+        #Waits to find start Tag0
+        while not start_found:
+            ret, frame = cap.read()
+            if not ret:
+                print("[!] Failed to read frame from stream.")
+                time.sleep(0.1)
+                continue
+
+            frame = cv2.resize(frame, (640, 360))
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            corners, ids, rejected = detection.detectMarkers(gray)
+
+            if ids is not None:
+                ids_flat = ids.flatten()
+                if 0 in ids_flat:
+                    # Draw and confirm
+                    aruco.drawDetectedMarkers(frame, corners, ids)
+                    print("[INFO] Start tag ID 0 detected. Zeroing origin at current pose (0,0).")
+                    # Zero the odom here
+                    est_x = 0.0
+                    est_y = 0.0
+                    path_x = [est_x]
+                    path_y = [est_y]
+                    last_pose_time = time.time()
+                    segment_start_time = time.time()
+                    start_found = True
+            # Just hover while searching for start tag
+            drone.hover()
+            window_title = f"AR.Drone {cam_name} Camera"
+            cv2.imshow(window_title, frame)
+
+            key = get_key()
+            key_cv = cv2.waitKey(1) & 0xFF
+            if key == 'q' or key_cv == ord('q'):
+                print("[*] Quit requested during start-tag search.")
+                raise KeyboardInterrupt
+        #Searches for start tag1
         while True:
             if cap is not None:
                 ret, frame = cap.read()
@@ -111,17 +156,10 @@ def main():
                     tag1_seen = True
                     aruco.drawDetectedMarkers(frame, corners, ids)
 
-            if tag1_seen:
-                print("[INFO] ArUco tag ID 1 detected! Landing...")
-                drone.hover()
-                time.sleep(0.5)
-                drone.land()
-                is_flying = False
-                time.sleep(3)
-                break  # exit main loop
-
-            # --- Zig-zag path logic ---
+            # --- Zig-zag path logic + time integration ---
             now = time.time()
+            dt = now - last_pose_time
+            last_pose_time = now
             current_seg = segments[segment_index]
             seg_dur = current_segment_duration(current_seg)
 
@@ -132,13 +170,30 @@ def main():
                 current_seg = segments[segment_index]
                 print(f"[PATH] Switching to segment: {current_seg}")
 
-            # Send movement command for current segment
+            if tag1_seen:
+                print("[INFO] ArUco tag ID 1 detected! Landing...")
+                drone.hover()
+                time.sleep(0.5)
+                drone.land()
+                is_flying = False
+                time.sleep(3)
+                break  # exit main loop
+
+            # Send movement command for current segment + estimate x and y
             if current_seg == "RIGHT":
                 drone.move(right=speed)
+                # PATH TRACKING: +x direction
+                est_x += speed * dt
             elif current_seg == "LEFT":
                 drone.move(left=speed)
+                # PATH TRACKING: -x direction
+                est_x -= speed * dt
             elif current_seg == "FORWARD":
                 drone.move(forward=speed)
+                # PATH TRACKING: +y direction
+                est_y += speed * dt
+            path_x.append(est_x)
+            path_y.append(est_y)
 
             window_title = f"AR.Drone {cam_name} Camera"
             cv2.imshow(window_title, frame)
@@ -167,6 +222,26 @@ def main():
         drone.close()
         cv2.destroyAllWindows()
         print("[*] Goodbye!")
+
+        #-------------------------
+        #plotting
+        #------------------------
+        print(f"[PATH] Estimated final offset from start:")
+        print(f"       x = {est_x:.2f} m (right +, left -)")
+        print(f"       y = {est_y:.2f} m (forward +, back -)")
+
+        plt.figure()
+        plt.plot(path_x, path_y, marker='o')
+        plt.scatter([0], [0], s=80)          # start
+        plt.scatter([est_x], [est_y], s=80)  # end
+        plt.text(0, 0, " Start (0,0)", va='bottom', ha='left')
+        plt.text(est_x, est_y, " End", va='bottom', ha='left')
+        plt.xlabel("x (m)  [right = +]")
+        plt.ylabel("y (m)  [forward = +]")
+        plt.title("Estimated Drone Path (Command-based Dead Reckoning)")
+        plt.axis('equal')
+        plt.grid(True)
+        plt.show()
 
 if __name__ == "__main__":
     main()
