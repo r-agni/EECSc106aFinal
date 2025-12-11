@@ -2,3 +2,4 @@ djitellopy>=2.4.0
 opencv-python>=4.8.0
 websockets>=12.0,<16.0
 numpy>=1.24.0
+keyboard>=0.13.5
