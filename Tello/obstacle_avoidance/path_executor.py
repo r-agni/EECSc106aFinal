@@ -227,7 +227,7 @@ class PathExecutor:
             success, msg = self.drone.send_command(command, distance=int(distance))
             if success:
                 self.position.update_from_command(command, {"distance": int(distance)})
-                time.sleep(2.0)  # Wait longer for stability
+                time.sleep(1.0)  # Wait for stability
             return success
 
         # Then handle horizontal movement
@@ -264,7 +264,7 @@ class PathExecutor:
                 
                 # Ensure drone is stable before rotation
                 print("[ROTATE] Stabilizing before rotation...")
-                time.sleep(2.0)  # Wait longer for drone to stabilize
+                time.sleep(1.0)  # Wait for drone to stabilize (reduced to avoid auto-land)
 
                 if angle_diff > 0:
                     success, msg = self.drone.send_command("rotate_ccw", degrees=int(rotation))
@@ -275,9 +275,9 @@ class PathExecutor:
                     if success:
                         self.position.update_from_command("rotate_cw", {"degrees": int(rotation)})
 
-                # Wait much longer for rotation to complete and stabilize
+                # Wait for rotation to complete and stabilize
                 print("[ROTATE] Waiting for stabilization after rotation...")
-                time.sleep(3.0)  # Wait 3 seconds for full stabilization
+                time.sleep(2.0)  # Wait 2 seconds for stabilization
                 return success
 
             # Move forward toward target
@@ -292,7 +292,7 @@ class PathExecutor:
             success, msg = self.drone.send_command("move_forward", distance=int(distance))
             if success:
                 self.position.update_from_command("move_forward", {"distance": int(distance)})
-                time.sleep(2.0)  # Wait longer for stability
+                time.sleep(1.0)  # Wait for stability
             return success
 
         return True
