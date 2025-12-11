@@ -17,7 +17,7 @@ def test_imports():
     print("Testing imports...")
     try:
         from navigate import SimpleNavigator
-        from obstacle_avoidance.path_planner import generate_waypoints_with_rrt, RRTPlanner
+        from obstacle_avoidance.path_planner import generate_waypoints_with_rrt, generate_waypoints_linear
         from obstacle_avoidance.path_executor import PathExecutor
         from obstacle_avoidance.obstacle_detector import ObstacleDetector
         from visualization.web_dashboard import WebDashboard
@@ -31,8 +31,8 @@ def test_imports():
 
 
 def test_rrt_planning():
-    """Test RRT path planning"""
-    print("\nTesting RRT path planning...")
+    """Test linear path planning"""
+    print("\nTesting linear path planning...")
     try:
         from obstacle_avoidance.path_planner import generate_waypoints_with_rrt
 
@@ -55,23 +55,23 @@ def test_rrt_planning():
         assert waypoints[0] == (0, 0, 120), "First waypoint should be start"
         assert waypoints[-1] == (300, 200, 0), "Last waypoint should be landing"
 
-        print("✓ RRT planning works correctly")
+        print("✓ Linear planning works correctly")
         return True
 
     except Exception as e:
-        print(f"✗ RRT planning failed: {e}")
+        print(f"✗ Linear planning failed: {e}")
         import traceback
         traceback.print_exc()
         return False
 
 
 def test_rrt_with_obstacles():
-    """Test RRT planning with obstacles"""
-    print("\nTesting RRT with obstacles...")
+    """Test linear planning with obstacles (obstacles parameter ignored)"""
+    print("\nTesting linear planning with obstacles parameter...")
     try:
         from obstacle_avoidance.path_planner import generate_waypoints_with_rrt
 
-        # Add obstacles in the path
+        # Add obstacles in the path (will be ignored by linear planner)
         obstacles = [
             (150, 100, 50),  # Obstacle at (150, 100) with 50cm radius
             (200, 150, 40),  # Another obstacle
@@ -90,11 +90,11 @@ def test_rrt_with_obstacles():
         for i, wp in enumerate(waypoints):
             print(f"    {i+1}. ({wp[0]:.0f}, {wp[1]:.0f}, {wp[2]:.0f})")
 
-        print("✓ RRT obstacle avoidance works")
+        print("✓ Linear planning works (obstacles handled reactively)")
         return True
 
     except Exception as e:
-        print(f"✗ RRT with obstacles failed: {e}")
+        print(f"✗ Linear planning with obstacles failed: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -221,8 +221,8 @@ def run_all_tests():
     results = []
 
     results.append(("Imports", test_imports()))
-    results.append(("RRT Planning", test_rrt_planning()))
-    results.append(("RRT with Obstacles", test_rrt_with_obstacles()))
+    results.append(("Linear Planning", test_rrt_planning()))
+    results.append(("Linear Planning (Obstacles)", test_rrt_with_obstacles()))
     results.append(("Dashboard State", test_dashboard_state()))
     results.append(("Waypoint Callback", test_waypoint_callback()))
     results.append(("Overlay Processor", test_overlay_processor()))
