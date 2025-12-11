@@ -27,6 +27,154 @@ from visualization.web_dashboard import WebDashboard
 from visualization.nav_wrapper import VisualizationWrapper
 
 
+def manual_control_mode(navigator, altitude: float = 120) -> int:
+    """
+    Manual WASD control mode with dashboard visualization.
+    
+    Args:
+        navigator: SimpleNavigator instance
+        altitude: Flight altitude in cm
+        
+    Returns:
+        Exit code (0 for success, 1 for error)
+    """
+    print("\n" + "="*60)
+    print("MANUAL WASD CONTROL MODE")
+    print("="*60)
+    print("Controls:")
+    print("  W - Move forward 30cm")
+    print("  A - Move left 30cm")
+    print("  S - Move backward 30cm")
+    print("  D - Move right 30cm")
+    print("  Q - Rotate counter-clockwise 30°")
+    print("  E - Rotate clockwise 30°")
+    print("  R - Move up 30cm")
+    print("  F - Move down 30cm")
+    print("  T - Takeoff")
+    print("  L - Land")
+    print("  ESC - Emergency stop")
+    print("="*60 + "\n")
+    
+    # Initialize web dashboard if enabled
+    if navigator.enable_live_map:
+        dashboard_port = navigator.video_handler.http_port + 1
+        navigator.live_map = WebDashboard(
+            target_x=0,
+            target_y=0,
+            target_theta=0,
+            port=dashboard_port,
+            video_port=navigator.video_handler.http_port
+        )
+        navigator.live_map.start()
+        navigator.live_map.set_status("MANUAL CONTROL")
+        print(f"[DASHBOARD] Web dashboard available at http://localhost:{dashboard_port}")
+        print(f"[DASHBOARD] Video stream on http://localhost:{navigator.video_handler.http_port}/stream")
+        time.sleep(1)
+    
+    input("Press ENTER to takeoff...")
+    
+    # Takeoff
+    print("[*] Taking off...")
+    success, msg = navigator.drone_ctrl.send_command("takeoff")
+    if not success:
+        print(f"[!] Takeoff failed: {msg}")
+        return 1
+    
+    time.sleep(5)  # Wait for takeoff to stabilize
+    navigator.executor.position.reset_position(0, 0, altitude)
+    
+    # Update dashboard with initial position
+    if navigator.enable_live_map:
+        navigator.live_map.update_position(0, 0, altitude, 0)
+    
+    print("[+] Drone in the air - WASD controls active")
+    print("[*] Use OpenCV window for keyboard input")
+    
+    landed = False
+    
+    try:
+        while not landed:
+            # Get keyboard input from video window
+            key = navigator.video_handler.get_keyboard_input()
+            
+            if key:
+                pos = navigator.executor.position.get_position()
+                
+                # Process key and execute command
+                if key == 'w':
+                    print("[WASD] Moving forward 30cm")
+                    navigator.drone_ctrl.send_command("move_forward", distance=30)
+                    navigator.executor.position.update_from_command("move_forward", {"distance": 30})
+                    
+                elif key == 'a':
+                    print("[WASD] Moving left 30cm")
+                    navigator.drone_ctrl.send_command("move_left", distance=30)
+                    navigator.executor.position.update_from_command("move_left", {"distance": 30})
+                    
+                elif key == 's':
+                    print("[WASD] Moving backward 30cm")
+                    navigator.drone_ctrl.send_command("move_back", distance=30)
+                    navigator.executor.position.update_from_command("move_back", {"distance": 30})
+                    
+                elif key == 'd':
+                    print("[WASD] Moving right 30cm")
+                    navigator.drone_ctrl.send_command("move_right", distance=30)
+                    navigator.executor.position.update_from_command("move_right", {"distance": 30})
+                    
+                elif key == 'q':
+                    print("[WASD] Rotating counter-clockwise 30°")
+                    navigator.drone_ctrl.send_command("rotate_ccw", degrees=30)
+                    navigator.executor.position.update_from_command("rotate_ccw", {"degrees": 30})
+                    
+                elif key == 'e':
+                    print("[WASD] Rotating clockwise 30°")
+                    navigator.drone_ctrl.send_command("rotate_cw", degrees=30)
+                    navigator.executor.position.update_from_command("rotate_cw", {"degrees": 30})
+                    
+                elif key == 'r':
+                    print("[WASD] Moving up 30cm")
+                    navigator.drone_ctrl.send_command("move_up", distance=30)
+                    navigator.executor.position.update_from_command("move_up", {"distance": 30})
+                    
+                elif key == 'f':
+                    print("[WASD] Moving down 30cm")
+                    navigator.drone_ctrl.send_command("move_down", distance=30)
+                    navigator.executor.position.update_from_command("move_down", {"distance": 30})
+                    
+                elif key == 'l':
+                    print("[WASD] Landing...")
+                    navigator.drone_ctrl.send_command("land")
+                    landed = True
+                    
+                elif key == '\x1b':  # ESC key
+                    print("[WASD] Emergency stop!")
+                    navigator.drone_ctrl.send_command("emergency")
+                    landed = True
+                
+                # Update dashboard after each movement
+                if navigator.enable_live_map and not landed:
+                    pos = navigator.executor.position.get_position()
+                    navigator.live_map.update_position(
+                        pos['x'], pos['y'], pos['z'],
+                        navigator.executor.position.yaw
+                    )
+                    print(f"[POS] ({pos['x']:.1f}, {pos['y']:.1f}, {pos['z']:.1f}) cm, Yaw: {navigator.executor.position.yaw:.1f}°")
+            
+            time.sleep(0.05)  # Small delay to prevent CPU overload
+        
+        if navigator.enable_live_map:
+            navigator.live_map.set_status("LANDED")
+            time.sleep(2)
+        
+        print("\n[+] Manual control session ended")
+        return 0
+        
+    except KeyboardInterrupt:
+        print("\n[!] Keyboard interrupt - Emergency landing")
+        navigator.drone_ctrl.send_command("land")
+        return 1
+
+
 class SimpleNavigator:
     """Simplified navigation system - go to (x, y, theta) with obstacle avoidance"""
 
@@ -299,13 +447,15 @@ def main():
     parser = argparse.ArgumentParser(
         description="Navigate Tello drone to target position with obstacle avoidance"
     )
-    parser.add_argument("--x", type=float, required=True, help="Target X position in cm (forward/back)")
-    parser.add_argument("--y", type=float, required=True, help="Target Y position in cm (left/right)")
+    parser.add_argument("--x", type=float, help="Target X position in cm (forward/back)")
+    parser.add_argument("--y", type=float, help="Target Y position in cm (left/right)")
     parser.add_argument("--theta", type=float, default=0, help="Target orientation in degrees (default: 0)")
     parser.add_argument("--altitude", type=float, default=120, help="Flight altitude in cm (default: 120)")
     parser.add_argument("--no-stream", action="store_true", help="Disable HTTP video streaming")
     parser.add_argument("--no-map", action="store_true", help="Disable live navigation map")
     parser.add_argument("--port", type=int, default=8080, help="HTTP streaming port (default: 8080)")
+    parser.add_argument("--no_telemetry", action="store_true", help="Disable telemetry sync after rotations (prevents infinite loops)")
+    parser.add_argument("--wasd", action="store_true", help="Enable manual WASD control mode with dashboard visualization")
 
     args = parser.parse_args()
 
@@ -316,10 +466,26 @@ def main():
         enable_live_map=not args.no_map
     )
 
+    # Apply telemetry configuration
+    if args.no_telemetry:
+        navigator.config.ENABLE_TELEMETRY_SYNC = False
+        print("[CONFIG] Telemetry sync disabled - using pure dead reckoning for rotations")
+
     try:
         # Connect to drone
         if not navigator.connect():
             print("[!] Connection failed - exiting")
+            return 1
+
+        # Check if WASD mode is enabled
+        if args.wasd:
+            print("\n[MODE] Manual WASD control mode activated")
+            return manual_control_mode(navigator, args.altitude)
+
+        # Validate required arguments for navigation mode
+        if args.x is None or args.y is None:
+            print("[!] Error: --x and --y are required for navigation mode")
+            print("    Use --wasd for manual control mode (no coordinates needed)")
             return 1
 
         # Navigate to target

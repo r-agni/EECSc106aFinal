@@ -289,6 +289,15 @@ class DroneController:
                 return True, msg
 
             except Exception as e:
+                error_str = str(e).lower()
+
+                # Check for auto-land error (drone safety mechanism)
+                if "auto land" in error_str:
+                    error_msg = "Drone triggered automatic safety landing. Possible causes: low battery, motor strain, or IMU instability. Please restart the drone."
+                    print(f"[!] AUTO-LAND DETECTED: {error_msg}")
+                    self.state_manager.set_flying(False)
+                    return False, error_msg
+
                 error_msg = f"Command failed: {str(e)}"
                 print(f"[!] {error_msg}")
                 return False, error_msg

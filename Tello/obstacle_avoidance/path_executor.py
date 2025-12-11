@@ -241,29 +241,57 @@ class PathExecutor:
 
             # If we need to turn significantly, rotate first
             if abs(angle_diff) > 15:  # 15 degree threshold
-                rotation = min(abs(angle_diff), 90)  # Max 90 degrees per step
-                rotation = max(rotation, 15)  # Minimum 15 degrees (reduced from 30 for IMU stability)
-
-                print(f"[ROTATE] Current yaw: {self.position.yaw:.1f}°, Target angle: {target_angle:.1f}°, "
-                      f"Need to rotate: {angle_diff:.1f}°, Will rotate: {rotation:.1f}°")
-                
-                # Ensure drone is stable before rotation
-                print("[ROTATE] Stabilizing before rotation...")
-                time.sleep(1.5)  # Wait for drone to stabilize
-
-                if angle_diff > 0:
-                    success, msg = self.drone.send_command("rotate_ccw", degrees=int(rotation))
-                    if success:
-                        self.position.update_from_command("rotate_ccw", {"degrees": int(rotation)})
+                # Check rotation attempt counter to prevent infinite loops
+                rotation_attempts = getattr(self, '_rotation_attempts', 0)
+                if rotation_attempts >= self.config.MAX_ROTATION_ATTEMPTS:
+                    print(f"[!] Max rotation attempts ({self.config.MAX_ROTATION_ATTEMPTS}) reached, moving forward anyway")
+                    self._rotation_attempts = 0  # Reset for next waypoint
+                    # Continue to forward movement instead of rotating
                 else:
-                    success, msg = self.drone.send_command("rotate_cw", degrees=int(rotation))
-                    if success:
-                        self.position.update_from_command("rotate_cw", {"degrees": int(rotation)})
+                    rotation = min(abs(angle_diff), 90)  # Max 90 degrees per step
+                    rotation = max(rotation, 15)  # Minimum 15 degrees (reduced from 30 for IMU stability)
 
-                # Wait longer for rotation to complete and IMU to stabilize
-                print("[ROTATE] Waiting for IMU to stabilize after rotation...")
-                time.sleep(2.5)  # Increased from 1.0s to 2.5s for IMU stability
-                return success
+                    self._rotation_attempts = rotation_attempts + 1
+                    print(f"[ROTATE] Current yaw: {self.position.yaw:.1f}°, Target angle: {target_angle:.1f}°, "
+                          f"Need to rotate: {angle_diff:.1f}°, Will rotate: {rotation:.1f}° (attempt {self._rotation_attempts}/{self.config.MAX_ROTATION_ATTEMPTS})")
+                    
+                    # Ensure drone is stable before rotation
+                    print("[ROTATE] Stabilizing before rotation...")
+                    time.sleep(1.5)  # Wait for drone to stabilize
+
+                    if angle_diff > 0:
+                        success, msg = self.drone.send_command("rotate_ccw", degrees=int(rotation))
+                        if success:
+                            self.position.update_from_command("rotate_ccw", {"degrees": int(rotation)})
+                        elif "auto land" in msg.lower():
+                            print("\n[!] CRITICAL: Drone auto-landed during rotation!")
+                            print("[!] Please restart the drone and try again.")
+                            return False
+                    else:
+                        success, msg = self.drone.send_command("rotate_cw", degrees=int(rotation))
+                        if success:
+                            self.position.update_from_command("rotate_cw", {"degrees": int(rotation)})
+                        elif "auto land" in msg.lower():
+                            print("\n[!] CRITICAL: Drone auto-landed during rotation!")
+                            print("[!] Please restart the drone and try again.")
+                            return False
+
+                    # Wait longer for rotation to complete and IMU to stabilize
+                    print("[ROTATE] Waiting for IMU to stabilize after rotation...")
+                    time.sleep(2.5)  # Increased from 1.0s to 2.5s for IMU stability
+
+                    # Optionally sync yaw with telemetry (can cause loops if telemetry lags)
+                    if self.config.ENABLE_TELEMETRY_SYNC:
+                        state = self.state.get_state()
+                        telemetry_yaw = state.get("orientation", {}).get("yaw", 0)
+                        # Always sync - yaw can legitimately be 0 degrees
+                        self.position.update_yaw(telemetry_yaw)
+                        print(f"[ROTATE] Post-rotation yaw from telemetry: {telemetry_yaw:.1f}°")
+
+                    return success
+
+            # Reset rotation counter when aligned properly
+            self._rotation_attempts = 0
 
             # Move forward toward target
             distance = min(horizontal_dist, self.config.MAX_STEP_DISTANCE)
@@ -346,13 +374,8 @@ class PathExecutor:
                         print("\n[!] Safety check failed - aborting")
                         return False
 
-                    # Update yaw from telemetry (only if telemetry is non-zero)
-                    # This prevents overwriting our dead-reckoning yaw with stale telemetry
-                    state = self.state.get_state()
-                    telemetry_yaw = state.get("orientation", {}).get("yaw", 0)
-                    # Only trust telemetry if it's significantly different (IMU has caught up)
-                    if abs(telemetry_yaw - self.position.yaw) > 5 or abs(self.position.yaw) < 1:
-                        self.position.update_yaw(telemetry_yaw)
+                    # Yaw is now synced inside move_toward_waypoint() after rotations complete
+                    # We no longer update it here to avoid race conditions with rotation telemetry
 
                     # Get current position
                     current_pos = self.position.get_position()

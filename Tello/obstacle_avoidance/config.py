@@ -69,3 +69,7 @@ class Config:
     VERBOSE_LOGGING = True
     LOG_DETECTIONS = True
     LOG_POSITION_UPDATES = False  # Can be noisy, disable for cleaner output
+
+    # ==================== TELEMETRY ====================
+    ENABLE_TELEMETRY_SYNC = True  # Sync yaw with telemetry after rotations (can cause loops if lagging)
+    MAX_ROTATION_ATTEMPTS = 5  # Maximum rotation attempts before giving up
