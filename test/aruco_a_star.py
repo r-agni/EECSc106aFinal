@@ -80,7 +80,7 @@ GRID_H = int(math.ceil(WORLD_SIZE_M / GRID_RES_M))
 
 TAG_ID_START = 0
 TAG_ID_GOAL = 1
-MARKER_SIZE_M = 0.175  # <-- set your real tag size
+MARKER_SIZE_M = 0.15  # <-- set your real tag size
 
 # conservative inflation radius for obstacle safety (cells)
 INFLATION_RADIUS_CELLS = 1
@@ -188,11 +188,23 @@ class DroneInterface:
             return (self.est_x, self.est_y, 0.0)
 
         # --- Extract velocities from navdata ---
-        vx = demo.vx / 1000.0    # convert mm/s → m/s (forward)
-        vy = demo.vy / 1000.0    # convert mm/s → m/s (rightward)
+        if hasattr(demo, "vx") and hasattr(demo, "vy"):
+            vx = demo.vx / 1000.0  # mm/s → m/s (forward)
+            vy = demo.vy / 1000.0  # mm/s → m/s (rightward)
+        else:
+            vx = 0.0
+            vy = 0.0
 
+        if hasattr(demo, "yaw"):
+            yaw_deg = demo.yaw
+        elif hasattr(demo, "psi"):
+            yaw_deg = demo.psi
+        elif hasattr(demo, "rotZ"):
+            yaw_deg = demo.rotZ
+        else:
+            yaw_deg = 0.0
         # --- Extract yaw angle ---
-        yaw_rad = math.radians(demo.yaw)
+        yaw_rad = math.radians(yaw_deg)
 
         # --- Time integration ---
         now = time.time()
@@ -213,26 +225,47 @@ class DroneInterface:
         """
         Command planar velocity in m/s and yaw rate in rad/s for a short burst.
         """
-        max_lin = 1.0     # max m/s → scaled to full stick deflection
+        max_lin = 0.2     # max m/s → scaled to full stick deflection
         max_yaw = 1.0     # max rad/s
-        pitch =  np.clip(vx / max_lin, -1.0, 1.0)    # forward/back
-        roll  =  np.clip(vy / max_lin, -1.0, 1.0)    # right/left
-        yaw   =  np.clip(yaw_rate / max_yaw, -1.0, 1.0)
-        gaz   =  0.0  # no vertical motion
+        vx_c = float(np.clip(vx, -max_lin, max_lin))    # forward/back
+        vy_c = float(np.clip(vy, -max_lin, max_lin))    # right/left
+        yaw_c = float(np.clip(yaw_rate, -max_yaw, max_yaw))
+
+        forward = 0.0
+        backward = 0.0
+        if vx_c > 0:
+            forward = vx_c / max_lin  # (0..1)
+        elif vx_c < 0:
+            backward = -vx_c / max_lin  # (0..1)
+        right = 0.0
+        left = 0.0
+        if vy_c > 0:
+            right = vy_c / max_lin
+        elif vy_c < 0:
+            left = -vy_c / max_lin        
+        ccw = 0.0
+        cw = 0.0
+        if yaw_c > 0:
+            ccw = yaw_c / max_yaw
+        elif yaw_c < 0:
+            cw = -yaw_c / max_yaw
+
 
         # send command
-        self.drone.send(
-            at.PCMD(
-                flag=1,
-                roll=roll,
-                pitch=pitch,
-                gaz=gaz,
-                yaw=yaw
+        self.drone.move(
+                forward=forward,
+                backward=backward,
+                right=right,
+                left=left,
+                cw=cw,
+                ccw=ccw,
+                up=0,
+                down=0,
             )
-        )
 
     def stop(self):
-        self.command_velocity_xy_yaw(0.0, 0.0, 0.0)
+        #self.command_velocity_xy_yaw(0.0, 0.0, 0.0)
+        self.drone.move(forward=0, backward=0, left=0, right=0, up=0, down=0, cw=0, ccw=0)
 
     def shutdown(self): #additional Function to ctrl + C code
         if self.is_flying:
@@ -519,7 +552,7 @@ def main():
         T_C0_A = None
         start_world_xy = (0.0, 0.0)
 
-        print("Searching for start tag #1 with bottom camera...")
+        print("Searching for start tag #0 with bottom camera...")
         while T_C0_A is None:
             frame_bot = drone.get_bottom_frame()
             if frame_bot is None:
@@ -530,7 +563,7 @@ def main():
             if TAG_ID_START in poses:
                 rvecA, tvecA = poses[TAG_ID_START]
                 T_C0_A = T_from_rvec_tvec(rvecA, tvecA)  # A -> C0
-                print("Start tag found. Setting Tag #1 as origin.")
+                print("Start tag found. Setting Tag #0 as origin.")
             else:
                 # tiny hover / micro adjust if needed
                 drone.stop()
