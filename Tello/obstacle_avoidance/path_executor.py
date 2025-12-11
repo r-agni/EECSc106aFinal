@@ -124,6 +124,7 @@ class PathExecutor:
         self.running = False
         self.start_time = None
         self.waypoint_callback = None  # Callback for waypoint updates
+        self.use_imu = True  # Use IMU data by default
 
     def set_waypoint_callback(self, callback):
         """Set callback function for waypoint progress updates"""
@@ -240,11 +241,14 @@ class PathExecutor:
                 angle_diff += 360
 
             # If we need to turn significantly, rotate first
-            if abs(angle_diff) > 15:  # 15 degree threshold
+            # Use larger tolerance when IMU is disabled to avoid rotation loops
+            rotation_threshold = 25 if not self.use_imu else 15
+            if abs(angle_diff) > rotation_threshold:
                 rotation = min(abs(angle_diff), 90)  # Max 90 degrees per step
                 rotation = max(rotation, 15)  # Minimum 15 degrees (reduced from 30 for IMU stability)
 
-                print(f"[ROTATE] Current yaw: {self.position.yaw:.1f}°, Target angle: {target_angle:.1f}°, "
+                imu_status = "IMU ENABLED" if self.use_imu else "DEAD RECKONING"
+                print(f"[ROTATE] ({imu_status}) Current yaw: {self.position.yaw:.1f}°, Target angle: {target_angle:.1f}°, "
                       f"Need to rotate: {angle_diff:.1f}°, Will rotate: {rotation:.1f}°")
                 
                 # Ensure drone is stable before rotation
@@ -346,13 +350,14 @@ class PathExecutor:
                         print("\n[!] Safety check failed - aborting")
                         return False
 
-                    # Update yaw from telemetry (only if telemetry is non-zero)
+                    # Update yaw from telemetry (only if IMU is enabled and telemetry is non-zero)
                     # This prevents overwriting our dead-reckoning yaw with stale telemetry
-                    state = self.state.get_state()
-                    telemetry_yaw = state.get("orientation", {}).get("yaw", 0)
-                    # Only trust telemetry if it's significantly different (IMU has caught up)
-                    if abs(telemetry_yaw - self.position.yaw) > 5 or abs(self.position.yaw) < 1:
-                        self.position.update_yaw(telemetry_yaw)
+                    if self.use_imu:
+                        state = self.state.get_state()
+                        telemetry_yaw = state.get("orientation", {}).get("yaw", 0)
+                        # Only trust telemetry if it's significantly different (IMU has caught up)
+                        if abs(telemetry_yaw - self.position.yaw) > 5 or abs(self.position.yaw) < 1:
+                            self.position.update_yaw(telemetry_yaw)
 
                     # Get current position
                     current_pos = self.position.get_position()

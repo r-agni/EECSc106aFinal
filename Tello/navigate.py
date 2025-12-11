@@ -4,12 +4,21 @@ Simplified autonomous navigation with obstacle avoidance and live video streamin
 Usage:
     python navigate.py --x 200 --y 100 --theta 45
 
+    # Run without IMU or PID controls (dead reckoning only)
+    python navigate.py --x 200 --y 100 --theta 45 --no-imu --no-pid
+
     This will:
     1. Connect to Tello drone
     2. Start video streaming (OpenCV window + browser at http://localhost:8080)
     3. Navigate to target position (x, y) in cm with final orientation theta
     4. Avoid obstacles along the way while maintaining target endpoint
     5. Land at destination
+
+Options:
+    --no-imu    Disable IMU yaw updates (use dead reckoning only for orientation)
+    --no-pid    Disable PID controller for final positioning (faster but less precise)
+    --no-stream Disable HTTP video streaming
+    --no-map    Disable live navigation map visualization
 """
 
 import sys
@@ -31,7 +40,7 @@ class SimpleNavigator:
     """Simplified navigation system - go to (x, y, theta) with obstacle avoidance"""
 
     def __init__(self, enable_video_stream: bool = True, http_port: int = 8080,
-                 enable_live_map: bool = True):
+                 enable_live_map: bool = True, use_imu: bool = True, use_pid: bool = True):
         """
         Initialize navigation system.
 
@@ -39,6 +48,8 @@ class SimpleNavigator:
             enable_video_stream: Enable HTTP video streaming
             http_port: Port for HTTP video stream
             enable_live_map: Enable live navigation map visualization
+            use_imu: Use IMU data for yaw updates (default: True)
+            use_pid: Use PID controller for final positioning (default: True)
         """
         self.config = Config()
         self.state_mgr = StateManager()
@@ -49,6 +60,8 @@ class SimpleNavigator:
         self.video_proc = None
         self.live_map = None
         self.enable_live_map = enable_live_map
+        self.use_imu = use_imu
+        self.use_pid = use_pid
 
     def connect(self) -> bool:
         """
@@ -89,6 +102,12 @@ class SimpleNavigator:
         # Initialize navigation components
         print("\n[STEP 4] Initializing navigation system...")
         self.executor = PathExecutor(self.drone_ctrl, self.state_mgr, self.video_handler, self.config)
+
+        # Disable IMU if requested
+        if not self.use_imu:
+            print("[!] IMU disabled - using dead reckoning only for yaw tracking")
+            self.executor.use_imu = False
+
         self.detector = ObstacleDetector(self.config)
         self.video_proc = VideoProcessor(self.video_handler)
 
@@ -187,63 +206,107 @@ class SimpleNavigator:
             success = self.executor.execute_path(waypoints)
 
         if success:
-            # Use PID controller for precise positioning at target
-            print("\n" + "="*60)
-            print("PID POSITION CORRECTION")
-            print("="*60)
-            print("Using PID control for precise landing at target...")
+            if self.use_pid:
+                # Use PID controller for precise positioning at target
+                print("\n" + "="*60)
+                print("PID POSITION CORRECTION")
+                print("="*60)
+                print("Using PID control for precise landing at target...")
 
-            # Update visualization state
-            if self.enable_live_map:
-                self.live_map.set_status("PID POSITIONING")
+                # Update visualization state
+                if self.enable_live_map:
+                    self.live_map.set_status("PID POSITIONING")
 
-            # Initialize PID controller
-            pid_controller = PositionController(
-                self.executor.position,
-                self.drone_ctrl,
-                self.state_mgr
-            )
+                # Initialize PID controller
+                pid_controller = PositionController(
+                    self.executor.position,
+                    self.drone_ctrl,
+                    self.state_mgr
+                )
 
-            # Wrap PID to update visualization
-            if self.enable_live_map:
-                pid_success = self._pid_with_viz(pid_controller, x, y, altitude, theta)
+                # Wrap PID to update visualization
+                if self.enable_live_map:
+                    pid_success = self._pid_with_viz(pid_controller, x, y, altitude, theta)
+                else:
+                    pid_success = pid_controller.move_to_target(x, y, altitude, theta)
+
+                # Update visualization state
+                if self.enable_live_map:
+                    self.live_map.set_status("NAVIGATING")
+
+                if pid_success:
+                    print("\n[PID] ✓ Precise position achieved!")
+
+                    # Now land
+                    print("\n[FINAL] Landing at target position...")
+                    self.drone_ctrl.send_command("land")
+                    time.sleep(3)
+
+                    # Mark mission complete on map
+                    if self.enable_live_map:
+                        self.live_map.set_status("COMPLETE")
+                        time.sleep(2)  # Let user see final state
+
+                    print("\n" + "="*60)
+                    print("NAVIGATION COMPLETED SUCCESSFULLY")
+                    print("="*60)
+                    print(f"Final position: ({x:.0f}, {y:.0f}) cm")
+                    print(f"Final orientation: {theta:.0f}°")
+                    print("="*60 + "\n")
+                    return True
+                else:
+                    print("\n[PID] ! Position correction incomplete, landing anyway...")
+                    self.drone_ctrl.send_command("land")
+                    time.sleep(3)
+
+                    if self.enable_live_map:
+                        self.live_map.set_status("INCOMPLETE")
+                        time.sleep(2)
+
+                    return False
             else:
-                pid_success = pid_controller.move_to_target(x, y, altitude, theta)
+                # Skip PID - just do final rotation and land
+                print("\n" + "="*60)
+                print("FINAL POSITIONING (NO PID)")
+                print("="*60)
+                print("[!] PID disabled - skipping precise positioning")
 
-            # Update visualization state
-            if self.enable_live_map:
-                self.live_map.set_status("NAVIGATING")
+                # Do final rotation to target theta
+                if theta != 0:
+                    print(f"\n[ROTATE] Rotating to final orientation {theta:.0f}°...")
+                    current_yaw = self.executor.position.yaw
+                    angle_diff = theta - current_yaw
 
-            if pid_success:
-                print("\n[PID] ✓ Precise position achieved!")
+                    # Normalize angle to [-180, 180]
+                    while angle_diff > 180:
+                        angle_diff -= 360
+                    while angle_diff < -180:
+                        angle_diff += 360
 
-                # Now land
-                print("\n[FINAL] Landing at target position...")
+                    if abs(angle_diff) > 5:
+                        if angle_diff > 0:
+                            self.drone_ctrl.send_command("rotate_ccw", degrees=int(abs(angle_diff)))
+                        else:
+                            self.drone_ctrl.send_command("rotate_cw", degrees=int(abs(angle_diff)))
+                        time.sleep(2)
+
+                # Land at current position
+                print("\n[FINAL] Landing at current position...")
                 self.drone_ctrl.send_command("land")
                 time.sleep(3)
 
                 # Mark mission complete on map
                 if self.enable_live_map:
                     self.live_map.set_status("COMPLETE")
-                    time.sleep(2)  # Let user see final state
+                    time.sleep(2)
 
                 print("\n" + "="*60)
-                print("NAVIGATION COMPLETED SUCCESSFULLY")
+                print("NAVIGATION COMPLETED (NO PID)")
                 print("="*60)
-                print(f"Final position: ({x:.0f}, {y:.0f}) cm")
+                print(f"Approximate final position: ({x:.0f}, {y:.0f}) cm")
                 print(f"Final orientation: {theta:.0f}°")
                 print("="*60 + "\n")
                 return True
-            else:
-                print("\n[PID] ! Position correction incomplete, landing anyway...")
-                self.drone_ctrl.send_command("land")
-                time.sleep(3)
-
-                if self.enable_live_map:
-                    self.live_map.set_status("INCOMPLETE")
-                    time.sleep(2)
-
-                return False
 
         return success
 
@@ -305,6 +368,8 @@ def main():
     parser.add_argument("--altitude", type=float, default=120, help="Flight altitude in cm (default: 120)")
     parser.add_argument("--no-stream", action="store_true", help="Disable HTTP video streaming")
     parser.add_argument("--no-map", action="store_true", help="Disable live navigation map")
+    parser.add_argument("--no-imu", action="store_true", help="Disable IMU yaw updates (use dead reckoning only)")
+    parser.add_argument("--no-pid", action="store_true", help="Disable PID controller for final positioning")
     parser.add_argument("--port", type=int, default=8080, help="HTTP streaming port (default: 8080)")
 
     args = parser.parse_args()
@@ -313,7 +378,9 @@ def main():
     navigator = SimpleNavigator(
         enable_video_stream=not args.no_stream,
         http_port=args.port,
-        enable_live_map=not args.no_map
+        enable_live_map=not args.no_map,
+        use_imu=not args.no_imu,
+        use_pid=not args.no_pid
     )
 
     try:
