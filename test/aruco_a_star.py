@@ -367,9 +367,9 @@ def detect_obstacles_front(frame_bgr) -> List[Tuple[float, float]]:
     u_roi = M["m10"] / M["m00"]
     # Convert to full-frame pixel x (ROI covers all columns, so this is same)
     u = u_roi
-    # Camera intrinsics (must match your actual K!)
-    fx = 600.0
-    cx = 320.0
+    # Camera intrinsics (must match your actual K!). See Main to know what to replace these.
+    fx = 580.0
+    cx = 311.98
     # Assume a fixed forward distance for all detections
     ASSUMED_DEPTH = 0.7  # meters in front of drone
     # Image x axis: right is positive.
@@ -488,133 +488,156 @@ def generate_lawnmower_waypoints(size_m: float, step_m: float) -> List[Tuple[flo
 def main():
     # --- Camera calibration placeholders ---
     # Replace with your real calibrated intrinsics for BOTH cameras if they differ.
-    K = np.array([
+    """K = np.array([
         [600.0, 0.0, 320.0],
         [0.0, 600.0, 240.0],
         [0.0, 0.0, 1.0]
     ], dtype=np.float64)
-    dist = np.zeros((5, 1), dtype=np.float64)
+    dist = np.zeros((5, 1), dtype=np.float64)"""
+
+    #Changed cx and fx to these values in detect_obstacles_front()
+    """K_front = np.array([
+        [580.28, 0.0, 311.98], 
+        [0.0, 579.76, 204.62],
+        [0.0, 0.0,   1.0]
+    ], dtype=np.float64)"""
+    K_bottom = np.array([
+        [223.99, 0.0, 87.30],
+        [0.0, 224.06, 72.00],
+        [0.0, 0.0, 1.0]
+    ], dtype=np.float64)
+    dist_bottom = np.zeros((5,1))
 
     drone = DroneInterface()
-    drone.connect()
-    drone.takeoff()
+    try:
+        drone.connect()
+        drone.takeoff()
 
-    grid = OccupancyGrid2D(GRID_W, GRID_H, GRID_RES_M)
+        grid = OccupancyGrid2D(GRID_W, GRID_H, GRID_RES_M)
 
-    # 1) Find/start on Tag 1 using bottom camera
-    T_C0_A = None
-    start_world_xy = (0.0, 0.0)
+        # 1) Find/start on Tag 0 using bottom camera
+        T_C0_A = None
+        start_world_xy = (0.0, 0.0)
 
-    print("Searching for start tag #1 with bottom camera...")
-    while T_C0_A is None:
-        frame_bot = drone.get_bottom_frame()
-        if frame_bot is None:
-            time.sleep(0.05)
-            continue
-
-        poses = detect_aruco_poses(frame_bot, K, dist)
-        if TAG_ID_START in poses:
-            rvecA, tvecA = poses[TAG_ID_START]
-            T_C0_A = T_from_rvec_tvec(rvecA, tvecA)  # A -> C0
-            print("Start tag found. Setting Tag #1 as origin.")
-        else:
-            # tiny hover / micro adjust if needed
-            drone.stop()
-            time.sleep(0.05)
-
-    # 2) Generate exploration waypoints in A-frame
-    explore_wps = generate_lawnmower_waypoints(WORLD_SIZE_M, step_m=0.4)
-
-    goal_world_xy = None
-
-    # 3) Explore: update obstacles, scan for Tag 2
-    for wp in explore_wps:
-        # (A) Move roughly toward waypoint (very simple controller)
-        # You should replace this with a proper position controller.
-        for _ in range(5):
-            # read pose
-            x, y, yaw = drone.get_local_pose_xytheta()
-            # NOTE: Here we assume local odom frame is close to A-frame for MVP simplicity.
-            # A proper version would compute/maintain T_A_C from tag fixes + odom.
-            dx = wp[0] - x
-            dy = wp[1] - y
-
-            dist_xy = math.hypot(dx, dy)
-            if dist_xy < 0.15:
-                drone.stop()
-                break
-
-            # simple proportional velocity
-            vx = 0.4 * np.clip(dx, -0.3, 0.3)
-            vy = 0.4 * np.clip(dy, -0.3, 0.3)
-            drone.command_velocity_xy_yaw(vx, vy, 0.0)
-            time.sleep(EXPLORATION_STEP_TIME)
-
-            # (B) obstacle update from front camera
-            frame_front = drone.get_front_frame()
-            if frame_front is not None:
-                obs_local = detect_obstacles_front(frame_front)
-                # transform local obstacle point into world
-                # For MVP: assume drone yaw small & local frame aligned with world
-                # Replace with proper rotation by yaw:
-                for ox_fwd, oy_left in obs_local:
-                    # local -> world approx
-                    ox = x + ox_fwd
-                    oy = y + oy_left
-                    grid.mark_occupied_world(ox, oy)
-
-            # (C) check for tag #2 with bottom camera
+        print("Searching for start tag #1 with bottom camera...")
+        while T_C0_A is None:
             frame_bot = drone.get_bottom_frame()
-            if frame_bot is not None:
-                poses = detect_aruco_poses(frame_bot, K, dist)
-                if TAG_ID_GOAL in poses:
-                    # This tvec is in camera coords; for a floor tag, we mainly need XY in A-frame.
-                    # For MVP: approximate goal at current drone position (x,y).
-                    goal_world_xy = (x, y)
-                    print("Goal tag #2 detected during exploration!")
+            if frame_bot is None:
+                time.sleep(0.05)
+                continue
+
+            poses = detect_aruco_poses(frame_bot, K_bottom, dist_bottom)
+            if TAG_ID_START in poses:
+                rvecA, tvecA = poses[TAG_ID_START]
+                T_C0_A = T_from_rvec_tvec(rvecA, tvecA)  # A -> C0
+                print("Start tag found. Setting Tag #1 as origin.")
+            else:
+                # tiny hover / micro adjust if needed
+                drone.stop()
+                time.sleep(0.05)
+
+        # 2) Generate exploration waypoints in A-frame
+        explore_wps = generate_lawnmower_waypoints(WORLD_SIZE_M, step_m=0.4)
+
+        goal_world_xy = None
+
+        # 3) Explore: update obstacles, scan for Tag 1
+        for wp in explore_wps:
+            # (A) Move roughly toward waypoint (very simple controller)
+            # You should replace this with a proper position controller.
+            for _ in range(5):
+                # read pose
+                x, y, yaw = drone.get_local_pose_xytheta()
+                # NOTE: Here we assume local odom frame is close to A-frame for MVP simplicity.
+                # A proper version would compute/maintain T_A_C from tag fixes + odom.
+                dx = wp[0] - x
+                dy = wp[1] - y
+
+                dist_xy = math.hypot(dx, dy)
+                if dist_xy < 0.15:
                     drone.stop()
                     break
 
-        if goal_world_xy is not None:
-            break
+                # simple proportional velocity
+                vx = 0.4 * np.clip(dx, -0.3, 0.3)
+                vy = 0.4 * np.clip(dy, -0.3, 0.3)
+                drone.command_velocity_xy_yaw(vx, vy, 0.0)
+                time.sleep(EXPLORATION_STEP_TIME)
 
-    if goal_world_xy is None:
-        print("Did not find tag #2 during coverage. Landing.")
-        drone.land()
-        return
+                # (B) obstacle update from front camera
+                frame_front = drone.get_front_frame()
+                if frame_front is not None:
+                    obs_local = detect_obstacles_front(frame_front)
+                    # transform local obstacle point into world
+                    # For MVP: assume drone yaw small & local frame aligned with world
+                    # Replace with proper rotation by yaw:
+                    for ox_fwd, oy_left in obs_local:
+                        # local -> world approx
+                        ox = x + ox_fwd
+                        oy = y + oy_left
+                        grid.mark_occupied_world(ox, oy)
 
-    # 4) Inflate obstacles for safety
-    grid.inflate_obstacles(INFLATION_RADIUS_CELLS)
+                # (C) check for tag #1 with bottom camera
+                frame_bot = drone.get_bottom_frame()
+                if frame_bot is not None:
+                    poses = detect_aruco_poses(frame_bot, K_bottom, dist_bottom)
+                    if TAG_ID_GOAL in poses:
+                        # This tvec is in camera coords; for a floor tag, we mainly need XY in A-frame.
+                        # For MVP: approximate goal at current drone position (x,y).
+                        goal_world_xy = (x, y)
+                        print("Goal tag #2 detected during exploration!")
+                        drone.stop()
+                        break
 
-    # 5) Plan path A -> B
-    path = astar(grid, start_world_xy, goal_world_xy)
-    if path is None or len(path) < 2:
-        print("No valid path found. Landing.")
-        drone.land()
-        return
-
-    print(f"Planned path with {len(path)} waypoints.")
-
-    # 6) Follow path (simple waypoint follower)
-    for wx, wy in path:
-        for _ in range(8):
-            x, y, yaw = drone.get_local_pose_xytheta()
-            dx = wx - x
-            dy = wy - y
-            d = math.hypot(dx, dy)
-
-            if d < 0.10:
-                drone.stop()
+            if goal_world_xy is not None:
                 break
 
-            vx = 0.5 * np.clip(dx, -0.25, 0.25)
-            vy = 0.5 * np.clip(dy, -0.25, 0.25)
-            drone.command_velocity_xy_yaw(vx, vy, 0.0)
-            time.sleep(0.25)
+        if goal_world_xy is None:
+            print("Did not find tag #2 during coverage. Landing.")
+            drone.land()
+            return
 
-    drone.stop()
-    print("Arrived near goal (estimated). Landing.")
-    drone.land()
+        # 4) Inflate obstacles for safety
+        grid.inflate_obstacles(INFLATION_RADIUS_CELLS)
+
+        # 5) Plan path A -> B
+        path = astar(grid, start_world_xy, goal_world_xy)
+        if path is None or len(path) < 2:
+            print("No valid path found. Landing.")
+            drone.land()
+            return
+
+        print(f"Planned path with {len(path)} waypoints.")
+
+        # 6) Follow path (simple waypoint follower)
+        for wx, wy in path:
+            for _ in range(8):
+                x, y, yaw = drone.get_local_pose_xytheta()
+                dx = wx - x
+                dy = wy - y
+                d = math.hypot(dx, dy)
+
+                if d < 0.10:
+                    drone.stop()
+                    break
+
+                vx = 0.5 * np.clip(dx, -0.25, 0.25)
+                vy = 0.5 * np.clip(dy, -0.25, 0.25)
+                drone.command_velocity_xy_yaw(vx, vy, 0.0)
+                time.sleep(0.25)
+
+        drone.stop()
+        print("Arrived near goal (estimated). Landing.")
+        drone.land()
+    except KeyboardInterrupt:
+        print("\n[!] KeyboardInterrupt caught. Emergency landing...")
+    except Exception as e:
+        print(f"\n[!] Exception occurred: {e}")
+    finally:
+        try:
+            drone.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
