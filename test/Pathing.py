@@ -17,30 +17,15 @@ detection = cv2.aruco.ArucoDetector(marker_dict, param_markers)
 
 speed = 0.05
 ROW_SPACING_M = 0.02
-SCALE_X = 1.0
-SCALE_Y = 1.0
+
+SCALE_X = 0.15
+SCALE_Y = 0.73
 
 def get_key():
     """Get a single keypress from terminal (Windows)."""
     if msvcrt.kbhit():
         return msvcrt.getch().decode('utf-8').lower()
     return None
-
-def segment_reached(current_seg, est_x, est_y, leg_start_x, leg_start_y, horiz_target, forward_target):
-    """
-    Return True if the current zig-zag segment has reached its target
-    distance, based on navdata-estimated position.
-    """
-    dx = est_x - leg_start_x
-    dy = est_y - leg_start_y
-    if current_seg == "RIGHT":
-        return dx >= horiz_target
-    elif current_seg == "LEFT":
-        return dx <= -horiz_target
-    elif current_seg == "FORWARD":
-        return dy >= forward_target
-    else:
-        return False
 
 def main():
     print("=" * 60)
@@ -95,8 +80,12 @@ def main():
     print("TAKEOFF")
     drone.takeoff()
     is_flying = True
-    time.sleep(3)
+    time.sleep(3.5)
     print("[OK] Airborne!")
+
+    T_RIGHT   = 5.0   # seconds per right leg
+    T_LEFT    = 5.5   # seconds per left leg
+    T_FORWARD = 1.8   # seconds per forward leg
 
     est_x = 0.0
     est_y = 0.0
@@ -105,7 +94,7 @@ def main():
     prev_v_right = 0.0
     prev_v_forward = 0.0
     alpha = 0.3
-    DRIFT_COMP = 0.02
+    DRIFT_COMP = 0.01
     last_pose_time = time.time()
     segment_start_time = time.time()
     start_found = False
@@ -129,12 +118,10 @@ def main():
                     aruco.drawDetectedMarkers(frame, corners, ids)
                     print("[INFO] Start tag ID 0 detected. Zeroing origin at current pose (0,0).")
                     # Zero the odom here
-                    est_x = 0.0
-                    est_y = 0.0
+                    est_x_r = 0.0
+                    est_y_r = 0.0
                     path_x = [est_x]
                     path_y = [est_y]
-                    leg_start_x = est_x
-                    leg_start_y = est_y
                     last_pose_time = time.time()
                     #segment_start_time = time.time()
                     start_found = True
@@ -149,10 +136,6 @@ def main():
                 print("[*] Quit requested during start-tag search.")
                 raise KeyboardInterrupt
         #Searches for start tag1
-        leg_start_x = est_x
-        leg_start_y = est_y
-        horiz_target   = 1.0   # ≈ 2 m sideways
-        forward_target = 0.20   # ≈ 0.10 m forward
         segment_start_time = time.time()
 
         while True:
@@ -221,8 +204,8 @@ def main():
                 vx = raw_vx * vel_scale
                 vy = raw_vy * vel_scale
                 # World frame: +x = right, +y = forward
-                v_forward = vx          # forward
-                v_right   = vy          # right (assuming +vy is right in your setup)
+                v_forward = -vx          # forward
+                v_right = vy          # right (assuming +vy is right in your setup)
 
                 # Smooth + removing small velocities
                 if abs(v_right) < 0.025:
@@ -233,45 +216,45 @@ def main():
                 v_forward = alpha * v_forward + (1 - alpha) * prev_v_forward
                 prev_v_right   = v_right
                 prev_v_forward = v_forward
-                # Integrate
-                est_x += SCALE_X * v_right * dt
-                est_y += SCALE_Y * v_forward * dt
+                # Integrate + scale
+                est_x_r += v_right * dt
+                est_y_r += v_forward * dt
+                est_x = SCALE_X * est_x_r
+                est_y = SCALE_Y * est_y_r
 
             path_x.append(est_x)
             path_y.append(est_y)
 
             #------- NEW switching states based off distance ----------
-            if current_seg == "FORWARD":
-                MAX_SEG_TIME = 2.5   # seconds (shorter)
-            else:
-                MAX_SEG_TIME = 6.0   # seconds (longer for 2m sideways)
-            if segment_reached(current_seg, est_x, est_y, leg_start_x, leg_start_y, horiz_target, forward_target):
-                # move to next segment
+            now = time.time()
+            elapsed = now - segment_start_time
+            if current_seg == "RIGHT" and elapsed >= T_RIGHT:
                 segment_index = (segment_index + 1) % len(segments)
                 current_seg = segments[segment_index]
                 segment_start_time = now
-
-                # reset leg start pose for the next segment
-                leg_start_x = est_x
-                leg_start_y = est_y
-                print(f"[PATH] Switching to segment: {current_seg} (distance reached)")
-
-                # brief hover to stabilize
+                print(f"[PATH] Switching to segment: {current_seg} (time-based RIGHT)")
                 drone.hover()
-                time.sleep(1.0)
+                time.sleep(0.7)
                 last_pose_time = time.time()
                 continue
-            #fail-safe
-            if time.time() - segment_start_time > MAX_SEG_TIME:
+
+            elif current_seg == "LEFT" and elapsed >= T_LEFT:
                 segment_index = (segment_index + 1) % len(segments)
                 current_seg = segments[segment_index]
-                segment_start_time = time.time()
-                leg_start_x = est_x
-                leg_start_y = est_y
-                print(f"[PATH] Switching to segment (via Fail safe): {current_seg} (timeout)")
-
+                segment_start_time = now
+                print(f"[PATH] Switching to segment: {current_seg} (time-based LEFT)")
                 drone.hover()
-                time.sleep(1.0)
+                time.sleep(0.7)
+                last_pose_time = time.time()
+                continue
+
+            elif current_seg == "FORWARD" and elapsed >= T_FORWARD:
+                segment_index = (segment_index + 1) % len(segments)
+                current_seg = segments[segment_index]
+                segment_start_time = now
+                print(f"[PATH] Switching to segment: {current_seg} (time-based FORWARD)")
+                drone.hover()
+                time.sleep(0.7)
                 last_pose_time = time.time()
                 continue
 
