@@ -513,6 +513,49 @@ def generate_lawnmower_waypoints(size_m: float, step_m: float) -> List[Tuple[flo
 
     return wps
 
+def generate_lawnmower_waypoints_with_obstacles(
+    grid: OccupancyGrid2D,
+    step_rows: int = 1,
+    margin_cells: int = 1,
+) -> List[Tuple[float, float]]:
+    """
+    Generate lawnmower-style waypoints that only pass through FREE cells.
+    - grid.grid[cy, cx] == 1 => occupied (tall obstacle or inflated region)
+    - step_rows: how many grid rows to skip between passes
+    - margin_cells: how many cells to leave as a border at each side
+    """
+    wps: List[Tuple[float, float]] = []
+    direction = 1  # +1: left->right, -1: right->left
+
+    # loop over rows in grid coordinates
+    cy = margin_cells
+    max_row = grid.height - margin_cells
+
+    while cy < max_row:
+        free_cells = []
+
+        # collect free cells in this row
+        for cx in range(margin_cells, grid.width - margin_cells):
+            if grid.grid[cy, cx] == 0:  # free
+                free_cells.append(cx)
+
+        if free_cells:
+            if direction == 1:
+                xs = free_cells              # left -> right
+            else:
+                xs = list(reversed(free_cells))  # right -> left
+
+            for cx in xs:
+                x_world, y_world = grid.cell_to_world(cx, cy)
+                wps.append((x_world, y_world))
+
+        # flip direction for next row
+        direction *= -1
+        cy += step_rows
+
+    return wps
+
+
 
 # -----------------------------
 # Main logic
@@ -570,7 +613,11 @@ def main():
                 time.sleep(0.05)
 
         # 2) Generate exploration waypoints in A-frame
-        explore_wps = generate_lawnmower_waypoints(WORLD_SIZE_M, step_m=0.4)
+        # explore_wps = generate_lawnmower_waypoints(WORLD_SIZE_M, step_m=0.4)
+        # After you have some initial obstacle info (or even with a blank grid):
+        grid.inflate_obstacles(INFLATION_RADIUS_CELLS)  # tall obstacles ⇒ bigger inflation
+        explore_wps = generate_lawnmower_waypoints_with_obstacles(grid, step_rows=1, margin_cells=1)
+
 
         goal_world_xy = None
 
