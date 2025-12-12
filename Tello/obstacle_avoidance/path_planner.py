@@ -1,12 +1,85 @@
 """
-Linear interpolation path planner for drone navigation.
+Path planner for drone navigation with Bresenham's Line Algorithm.
 
-Generates waypoints from start to goal using simple linear interpolation.
-Fast, deterministic, and 100% reliable - obstacles handled by reactive avoidance.
+Generates waypoints from start to goal using Bresenham's algorithm for
+integer-precision line drawing. Fast, deterministic, and 100% reliable.
 """
 
 import math
 from typing import List, Tuple
+
+
+def bresenham_line(x0: int, y0: int, x1: int, y1: int) -> List[Tuple[int, int]]:
+    """
+    Generate all integer points on a line using Bresenham's Line Algorithm.
+    
+    This is the classic algorithm for drawing lines on a pixel grid, using
+    only integer arithmetic (additions, subtractions, and bit shifts).
+    
+    Algorithm:
+    1. Calculate dx = |x1 - x0| and dy = |y1 - y0|
+    2. Determine step direction: sx = sign(x1 - x0), sy = sign(y1 - y0)
+    3. Initialize error: err = dx - dy
+    4. Iterate, adjusting x or y based on accumulated error
+    
+    Benefits:
+    - Integer-only arithmetic (no floating-point operations)
+    - Fast execution (only additions and comparisons)
+    - Accurate (minimizes error between ideal line and pixels)
+    - Symmetric (same points regardless of direction)
+    
+    Time Complexity: O(max(dx, dy))
+    Space Complexity: O(max(dx, dy)) for storing points
+    
+    Args:
+        x0, y0: Start point coordinates (integers)
+        x1, y1: End point coordinates (integers)
+    
+    Returns:
+        List of (x, y) integer coordinate tuples representing all points on the line
+    
+    Example:
+        >>> points = bresenham_line(0, 0, 5, 3)
+        >>> # Returns: [(0,0), (1,1), (2,1), (3,2), (4,2), (5,3)]
+    """
+    points = []
+    
+    # Calculate deltas
+    dx = abs(x1 - x0)
+    dy = abs(y1 - y0)
+    
+    # Determine step direction
+    sx = 1 if x0 < x1 else -1
+    sy = 1 if y0 < y1 else -1
+    
+    # Initialize error
+    err = dx - dy
+    
+    # Current position
+    x, y = x0, y0
+    
+    while True:
+        # Add current point
+        points.append((x, y))
+        
+        # Check if we've reached the end
+        if x == x1 and y == y1:
+            break
+        
+        # Calculate error * 2 (to avoid floating point)
+        e2 = 2 * err
+        
+        # Step in x direction if needed
+        if e2 > -dy:
+            err -= dy
+            x += sx
+        
+        # Step in y direction if needed
+        if e2 < dx:
+            err += dx
+            y += sy
+    
+    return points
 
 
 def generate_waypoints_linear(start_x: float, start_y: float,

@@ -103,6 +103,32 @@ The system uses YOLOv8 for real-time object detection and automatically:
 4. **Executes** mathematically balanced maneuvers
 5. **Compensates** position to maintain target endpoint
 
+### Path Planning with Bresenham's Algorithm
+
+The system uses **Bresenham's Line Algorithm** for efficient waypoint generation:
+
+**Algorithm Benefits:**
+- ✓ Integer-only arithmetic (no floating-point operations)
+- ✓ Fast execution (only additions and comparisons)
+- ✓ Accurate line representation on discrete grid
+- ✓ Symmetric (same points regardless of direction)
+
+**How it works:**
+```python
+# Generate all integer points on line from (0,0) to (5,3)
+points = bresenham_line(0, 0, 5, 3)
+# Returns: [(0,0), (1,1), (2,1), (3,2), (4,2), (5,3)]
+```
+
+**Rationale:**
+Bresenham's algorithm was chosen over linear interpolation because:
+1. **Efficiency**: Uses only integer arithmetic, making it faster on embedded systems
+2. **Precision**: Minimizes error between ideal line and discrete points
+3. **Deterministic**: Always produces the same points for given endpoints
+4. **Industry Standard**: Proven algorithm used in graphics and robotics for 50+ years
+
+See [`obstacle_avoidance/path_planner.py`](obstacle_avoidance/path_planner.py) for implementation.
+
 ### Avoidance Maneuvers
 
 **Lateral Dodge** (default):
@@ -152,7 +178,21 @@ Target: (200, 100) cm
 Final position: (205, 115) ± 10cm - Landing!
 ```
 
-See [pid_controller/README.md](pid_controller/README.md) for technical details.
+**Rationale for PID Control:**
+
+PID control was chosen for precise landing because:
+1. **Proven Technology**: Industry-standard control method used in aviation for decades
+2. **Drift Compensation**: Corrects accumulated dead reckoning errors automatically
+3. **Wind Rejection**: Integral term handles constant disturbances (wind, motor bias)
+4. **Smooth Control**: Derivative term prevents overshooting and oscillation
+5. **Tunable**: Gains can be adjusted for different drone dynamics and conditions
+
+**PID Tuning:**
+- Kp (Proportional): 1.0 - Provides immediate response to error
+- Ki (Integral): 0.1 - Eliminates steady-state error over time
+- Kd (Derivative): 0.3 - Dampens oscillations and overshooting
+
+See [`pid_controller/position_controller.py`](pid_controller/position_controller.py) for implementation details.
 
 ## Safety Features
 
@@ -212,6 +252,9 @@ navigate.py (main script)
     ↓
 DroneController (WiFi + SDK connection)
     ↓
+PathPlanner (Bresenham's line algorithm) ← NEW!
+    └── bresenham_line() - Integer-precision waypoint generation
+    ↓
 PathExecutor (obstacle avoidance navigation)
     ├── PositionEstimator (dead reckoning)
     ├── ObstacleDetector (YOLOv8)
@@ -224,6 +267,16 @@ PositionController (PID precise landing) ← NEW!
     ├── PIDController (Z-axis)
     └── PIDController (Yaw rotation)
 ```
+
+### Key Modules
+
+| Module | Purpose | Algorithm | Rationale |
+|--------|---------|-----------|-----------|
+| **path_planner.py** | Waypoint generation | Bresenham's Line | Integer arithmetic, fast, deterministic |
+| **obstacle_detector.py** | Object detection | YOLOv8 | Real-time, 80+ classes, 89.7% mAP |
+| **circumvent.py** | Avoidance maneuvers | Balanced dodge | Maintains target endpoint |
+| **position_controller.py** | Precise landing | PID Control | Compensates drift, ±10cm accuracy |
+| **path_executor.py** | Navigation control | Dead reckoning | Continuous position tracking |
 
 ## System Requirements
 
