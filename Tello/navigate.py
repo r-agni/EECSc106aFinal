@@ -4,9 +4,6 @@ Simplified autonomous navigation with obstacle avoidance and live video streamin
 Usage:
     python navigate.py --x 200 --y 100 --theta 45
 
-    # Run without IMU or PID controls (dead reckoning only)
-    python navigate.py --x 200 --y 100 --theta 45 --no-imu --no-pid
-
     This will:
     1. Connect to Tello drone
     2. Start video streaming (OpenCV window + browser at http://localhost:8080)
@@ -15,32 +12,81 @@ Usage:
     5. Land at destination
 
 Options:
-    --no-imu    Disable IMU yaw updates (use dead reckoning only for orientation)
-    --no-pid    Disable PID controller for final positioning (faster but less precise)
     --no-stream Disable HTTP video streaming
     --no-map    Disable live navigation map visualization
+
+Enhanced Debugging:
+    This version includes comprehensive logging and diagnostics to help identify
+    issues with drone connection and takeoff:
+
+    - Connection diagnostics: Detailed WiFi and SDK connection status
+    - Pre-takeoff checks: Battery, height, temperature, and connection verification
+    - Takeoff monitoring: Real-time progress tracking with height verification
+    - Error analysis: Specific troubleshooting tips based on error type
+    - State logging: Continuous monitoring of drone telemetry during flight
+
+    If the drone is not taking off, check the detailed logs for:
+    1. WiFi connection status and ping results
+    2. SDK connection errors and timeout messages
+    3. Battery level warnings (needs 10%+ to fly, 30%+ recommended)
+    4. Pre-takeoff height sensor readings
+    5. Takeoff command execution time and post-takeoff height verification
 """
 
 import sys
 import time
 import argparse
 import math
-from tello_server import DroneController, StateManager, VideoStreamHandler
+from djitellopy import Tello
+from drone_wrapper import TelloConnection, VideoStreamHandler
 from obstacle_avoidance.path_executor import PathExecutor, PositionEstimator
 from obstacle_avoidance.config import Config
 from obstacle_avoidance.obstacle_detector import ObstacleDetector
 from obstacle_avoidance.video_processor import VideoProcessor
 from obstacle_avoidance.path_planner import generate_waypoints_with_rrt
-from pid_controller import PositionController
 from visualization.web_dashboard import WebDashboard
 from visualization.nav_wrapper import VisualizationWrapper
+
+
+def convert_desired_to_command_distance(x_desired: float, y_desired: float) -> tuple[float, float]:
+    """
+    Convert desired actual distances to drone command values.
+    
+    Based on calibration:
+    - Command: x=200cm, y=500cm
+    - Actual movement: x=104cm (1.04m), y=528cm (5.28m)
+    
+    To achieve desired distance, we need to reverse the scale:
+    - X: command = desired / 0.52 (or desired * 1.923)
+    - Y: command = desired / 1.056 (or desired * 0.947)
+    
+    Args:
+        x_desired: Desired actual X distance in meters
+        y_desired: Desired actual Y distance in meters
+        
+    Returns:
+        Tuple of (command_x, command_y) in cm for drone commands
+    """
+    # Scale factors from calibration
+    X_ACTUAL_SCALE = 0.52  # actual = command * 0.52
+    Y_ACTUAL_SCALE = 1.056  # actual = command * 1.056
+    
+    # Convert meters to cm
+    x_desired_cm = x_desired * 100
+    y_desired_cm = y_desired * 100
+    
+    # Reverse the scale to get command values
+    command_x = x_desired_cm / X_ACTUAL_SCALE
+    command_y = y_desired_cm / Y_ACTUAL_SCALE
+    
+    return command_x, command_y
 
 
 class SimpleNavigator:
     """Simplified navigation system - go to (x, y, theta) with obstacle avoidance"""
 
     def __init__(self, enable_video_stream: bool = True, http_port: int = 8080,
-                 enable_live_map: bool = True, use_imu: bool = True, use_pid: bool = True):
+                 enable_live_map: bool = True):
         """
         Initialize navigation system.
 
@@ -48,20 +94,17 @@ class SimpleNavigator:
             enable_video_stream: Enable HTTP video streaming
             http_port: Port for HTTP video stream
             enable_live_map: Enable live navigation map visualization
-            use_imu: Use IMU data for yaw updates (default: True)
-            use_pid: Use PID controller for final positioning (default: True)
         """
         self.config = Config()
-        self.state_mgr = StateManager()
-        self.drone_ctrl = DroneController(self.state_mgr)
-        self.video_handler = VideoStreamHandler(enable_http_stream=enable_video_stream, http_port=http_port)
+        self.tello = None
+        self.video_handler = None
+        self.enable_video_stream = enable_video_stream
+        self.http_port = http_port
         self.executor = None
         self.detector = None
         self.video_proc = None
         self.live_map = None
         self.enable_live_map = enable_live_map
-        self.use_imu = use_imu
-        self.use_pid = use_pid
 
     def connect(self) -> bool:
         """
@@ -76,37 +119,73 @@ class SimpleNavigator:
 
         # Connect to WiFi
         print("\n[STEP 1] Connecting to Tello WiFi...")
-        if not self.drone_ctrl.connect_wifi():
-            print("[!] WiFi connection failed")
+        if not TelloConnection.connect_wifi():
+            print("\n[!] WiFi connection failed")
+            print("[!] Troubleshooting steps:")
+            print("    1. Ensure Tello drone is powered ON")
+            print("    2. Wait for WiFi LED to blink (indicates ready)")
+            print("    3. Check Windows WiFi settings")
+            print("    4. Try connecting to Tello WiFi manually first")
+            print("    5. Restart the drone if issues persist")
             return False
 
         # Connect to drone
-        print("\n[STEP 2] Connecting to drone...")
-        if not self.drone_ctrl.connect_drone():
-            print("[!] Drone connection failed")
+        print("\n[STEP 2] Connecting to drone SDK...")
+        print("[INFO] This establishes command/control connection")
+        try:
+            self.tello = Tello()
+            self.tello.connect()
+            print("[+] SDK connection established")
+        except Exception as e:
+            print(f"\n[!] Drone SDK connection failed: {e}")
+            print("[!] Troubleshooting steps:")
+            print("    1. Verify WiFi connection is active")
+            print("    2. Check if another program is using the drone")
+            print("    3. Restart the drone (power cycle)")
+            print("    4. Ensure no firewall blocking UDP ports 8889, 8890, 11111")
+            print("    5. Try pinging 192.168.10.1 to verify network connectivity")
             return False
 
         # Check battery
-        battery = self.state_mgr.get_state().get("battery", 0)
-        if battery < 30:
-            print(f"[!] Battery too low ({battery}%) - need at least 30%")
+        print("\n[STEP 3] Checking battery and drone status...")
+        battery = self.tello.get_battery()
+        temp = self.tello.get_temperature()
+
+        print(f"[STATUS] Battery: {battery}%")
+        print(f"[STATUS] Temperature: {temp}°C")
+        print(f"[STATUS] Connection: connected")
+
+        if battery < 10:
+            print(f"\n[ERROR] Battery critically low ({battery}%) - CANNOT FLY")
+            print("[ERROR] Please charge the battery before flying")
             return False
-        print(f"[+] Battery: {battery}%")
+        elif battery < 20:
+            print(f"\n[WARN] Battery low ({battery}%) - flight time will be limited")
+            print("[WARN] Consider charging for longer flights")
+        elif battery < 30:
+            print(f"[WARN] Battery at {battery}% - should be adequate for short flights")
+
+        if battery < 30:
+            user_input = input(f"\nBattery is at {battery}%. Continue anyway? (y/N): ")
+            if user_input.lower() != 'y':
+                print("[!] Aborted by user due to low battery")
+                return False
+
+        print(f"[+] Battery check passed: {battery}%")
 
         # Start video stream
-        print("\n[STEP 3] Starting video stream...")
-        self.drone_ctrl.start_video_stream()
+        print("\n[STEP 4] Starting video stream...")
+        print("[INFO] Opening video UDP stream on port 11111...")
+        self.tello.streamon()
+        self.video_handler = VideoStreamHandler(self.tello, enable_http_stream=self.enable_video_stream, http_port=self.http_port)
         self.video_handler.start_stream()
+        print("[+] Waiting for video stream to stabilize...")
         time.sleep(3)  # Wait for stream to stabilize
+        print("[+] Video stream ready")
 
         # Initialize navigation components
-        print("\n[STEP 4] Initializing navigation system...")
-        self.executor = PathExecutor(self.drone_ctrl, self.state_mgr, self.video_handler, self.config)
-
-        # Disable IMU if requested
-        if not self.use_imu:
-            print("[!] IMU disabled - using dead reckoning only for yaw tracking")
-            self.executor.use_imu = False
+        print("\n[STEP 5] Initializing navigation system...")
+        self.executor = PathExecutor(self.tello, self.video_handler, self.config)
 
         self.detector = ObstacleDetector(self.config)
         self.video_proc = VideoProcessor(self.video_handler)
@@ -205,144 +284,55 @@ class SimpleNavigator:
         else:
             success = self.executor.execute_path(waypoints)
 
-        if success:
-            if self.use_pid:
-                # Use PID controller for precise positioning at target
-                print("\n" + "="*60)
-                print("PID POSITION CORRECTION")
-                print("="*60)
-                print("Using PID control for precise landing at target...")
+        # Handle navigation failure - always land the drone
+        if not success:
+            print("\n" + "="*60)
+            print("NAVIGATION FAILED - EMERGENCY LANDING")
+            print("="*60)
+            print("[!] Path execution failed - performing emergency landing")
 
-                # Update visualization state
-                if self.enable_live_map:
-                    self.live_map.set_status("PID POSITIONING")
+            if self.enable_live_map:
+                self.live_map.set_status("FAILED")
 
-                # Initialize PID controller
-                pid_controller = PositionController(
-                    self.executor.position,
-                    self.drone_ctrl,
-                    self.state_mgr
-                )
+            self.tello.land()
+            time.sleep(1)
 
-                # Wrap PID to update visualization
-                if self.enable_live_map:
-                    pid_success = self._pid_with_viz(pid_controller, x, y, altitude, theta)
-                else:
-                    pid_success = pid_controller.move_to_target(x, y, altitude, theta)
+            print("\n[!] Emergency landing complete")
+            print("="*60 + "\n")
+            return False
 
-                # Update visualization state
-                if self.enable_live_map:
-                    self.live_map.set_status("NAVIGATING")
+        # Navigation succeeded - do final rotation and land
+        print("\n" + "="*60)
+        print("FINAL POSITIONING")
+        print("="*60)
 
-                if pid_success:
-                    print("\n[PID] ✓ Precise position achieved!")
-
-                    # Now land
-                    print("\n[FINAL] Landing at target position...")
-                    self.drone_ctrl.send_command("land")
-                    time.sleep(3)
-
-                    # Mark mission complete on map
-                    if self.enable_live_map:
-                        self.live_map.set_status("COMPLETE")
-                        time.sleep(2)  # Let user see final state
-
-                    print("\n" + "="*60)
-                    print("NAVIGATION COMPLETED SUCCESSFULLY")
-                    print("="*60)
-                    print(f"Final position: ({x:.0f}, {y:.0f}) cm")
-                    print(f"Final orientation: {theta:.0f}°")
-                    print("="*60 + "\n")
-                    return True
-                else:
-                    print("\n[PID] ! Position correction incomplete, landing anyway...")
-                    self.drone_ctrl.send_command("land")
-                    time.sleep(3)
-
-                    if self.enable_live_map:
-                        self.live_map.set_status("INCOMPLETE")
-                        time.sleep(2)
-
-                    return False
+        # Do final rotation to target theta
+        # Simplified: just execute rotation command without verification or looping
+        if theta != 0:
+            print(f"\n[ROTATE] Rotating to final orientation {theta:.0f}°...")
+            # Execute rotation directly, trust it works without verification
+            if theta > 0:
+                self.tello.rotate_counter_clockwise(int(abs(theta)))
             else:
-                # Skip PID - just do final rotation and land
-                print("\n" + "="*60)
-                print("FINAL POSITIONING (NO PID)")
-                print("="*60)
-                print("[!] PID disabled - skipping precise positioning")
+                self.tello.rotate_clockwise(int(abs(theta)))
 
-                # Do final rotation to target theta
-                if theta != 0:
-                    print(f"\n[ROTATE] Rotating to final orientation {theta:.0f}°...")
-                    current_yaw = self.executor.position.yaw
-                    angle_diff = theta - current_yaw
+        # Land at current position
+        print("\n[FINAL] Landing at target position...")
+        self.tello.land()
+        time.sleep(1)
 
-                    # Normalize angle to [-180, 180]
-                    while angle_diff > 180:
-                        angle_diff -= 360
-                    while angle_diff < -180:
-                        angle_diff += 360
+        # Mark mission complete on map
+        if self.enable_live_map:
+            self.live_map.set_status("COMPLETE")
+            time.sleep(1)
 
-                    if abs(angle_diff) > 5:
-                        if angle_diff > 0:
-                            self.drone_ctrl.send_command("rotate_ccw", degrees=int(abs(angle_diff)))
-                        else:
-                            self.drone_ctrl.send_command("rotate_cw", degrees=int(abs(angle_diff)))
-                        time.sleep(2)
-
-                # Land at current position
-                print("\n[FINAL] Landing at current position...")
-                self.drone_ctrl.send_command("land")
-                time.sleep(3)
-
-                # Mark mission complete on map
-                if self.enable_live_map:
-                    self.live_map.set_status("COMPLETE")
-                    time.sleep(2)
-
-                print("\n" + "="*60)
-                print("NAVIGATION COMPLETED (NO PID)")
-                print("="*60)
-                print(f"Approximate final position: ({x:.0f}, {y:.0f}) cm")
-                print(f"Final orientation: {theta:.0f}°")
-                print("="*60 + "\n")
-                return True
-
-        return success
-
-    def _pid_with_viz(self, pid_controller, x, y, z, yaw) -> bool:
-        """PID control with visualization updates."""
-        # Hook into PID's execute_control_step to update viz
-        original_execute = pid_controller.execute_control_step
-
-        def wrapped_execute(outputs):
-            # Update position on map before executing
-            pos = pid_controller.position_est.get_position()
-            self.live_map.update_position(
-                pos['x'], pos['y'], pos['z'],
-                pid_controller.position_est.yaw
-            )
-
-            # Execute movement
-            result = original_execute(outputs)
-
-            # Update position after executing
-            pos = pid_controller.position_est.get_position()
-            self.live_map.update_position(
-                pos['x'], pos['y'], pos['z'],
-                pid_controller.position_est.yaw
-            )
-
-            return result
-
-        # Replace method temporarily
-        pid_controller.execute_control_step = wrapped_execute
-
-        try:
-            return pid_controller.move_to_target(x, y, z, yaw)
-        finally:
-            # Restore original
-            pid_controller.execute_control_step = original_execute
+        print("\n" + "="*60)
+        print("NAVIGATION COMPLETED SUCCESSFULLY")
+        print("="*60)
+        print(f"Final position: ({x:.0f}, {y:.0f}) cm")
+        print(f"Final orientation: {theta:.0f}°")
+        print("="*60 + "\n")
+        return True
 
     def cleanup(self):
         """Clean shutdown"""
@@ -351,9 +341,15 @@ class SimpleNavigator:
             self.live_map.stop()
         if self.video_handler:
             self.video_handler.stop_stream()
-        if self.drone_ctrl:
-            self.drone_ctrl.stop_video_stream()
-            self.drone_ctrl.disconnect()
+        if self.tello:
+            try:
+                self.tello.streamoff()
+            except:
+                pass
+            try:
+                self.tello.end()
+            except:
+                pass
         print("[+] Shutdown complete")
 
 
@@ -368,19 +364,22 @@ def main():
     parser.add_argument("--altitude", type=float, default=120, help="Flight altitude in cm (default: 120)")
     parser.add_argument("--no-stream", action="store_true", help="Disable HTTP video streaming")
     parser.add_argument("--no-map", action="store_true", help="Disable live navigation map")
-    parser.add_argument("--no-imu", action="store_true", help="Disable IMU yaw updates (use dead reckoning only)")
-    parser.add_argument("--no-pid", action="store_true", help="Disable PID controller for final positioning")
     parser.add_argument("--port", type=int, default=8080, help="HTTP streaming port (default: 8080)")
 
     args = parser.parse_args()
+
+    # Convert desired distances (in meters) to drone command values (in cm)
+    command_x, command_y = convert_desired_to_command_distance(args.x, args.y)
+    
+    print(f"\n[CONVERSION] Desired distances: ({args.x:.2f}m, {args.y:.2f}m)")
+    print(f"[CONVERSION] Drone commands: ({command_x:.0f}cm, {command_y:.0f}cm)")
+    print(f"[CONVERSION] Expected actual movement: ({args.x:.2f}m, {args.y:.2f}m)\n")
 
     # Create navigator
     navigator = SimpleNavigator(
         enable_video_stream=not args.no_stream,
         http_port=args.port,
-        enable_live_map=not args.no_map,
-        use_imu=not args.no_imu,
-        use_pid=not args.no_pid
+        enable_live_map=not args.no_map
     )
 
     try:
@@ -389,10 +388,10 @@ def main():
             print("[!] Connection failed - exiting")
             return 1
 
-        # Navigate to target
+        # Navigate to target using command coordinates
         success = navigator.navigate_to(
-            x=args.x,
-            y=args.y,
+            x=command_x,
+            y=command_y,
             theta=args.theta,
             altitude=args.altitude
         )
@@ -406,9 +405,9 @@ def main():
     except KeyboardInterrupt:
         print("\n\n[!] Keyboard interrupt - Emergency landing!")
         try:
-            navigator.drone_ctrl.send_command("emergency")
-        except:
-            pass
+            navigator.tello.emergency()
+        except Exception as e:
+            print(f"[!] Emergency command failed: {e}")
         return 1
 
     except Exception as e:
@@ -416,9 +415,9 @@ def main():
         import traceback
         traceback.print_exc()
         try:
-            navigator.drone_ctrl.send_command("emergency")
-        except:
-            pass
+            navigator.tello.emergency()
+        except Exception as emergency_err:
+            print(f"[!] Emergency command failed: {emergency_err}")
         return 1
 
     finally:

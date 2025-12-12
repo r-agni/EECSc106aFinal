@@ -13,6 +13,7 @@ from .config import Config
 from .video_processor import VideoProcessor
 from .obstacle_detector import ObstacleDetector
 from .circumvent import ObstacleCircumvention
+from tello_commands import TelloSafeCommands
 
 
 class PositionEstimator:
@@ -43,23 +44,24 @@ class PositionEstimator:
 
         if command == "move_forward":
             # Move in current heading direction
-            self.pos["x"] += dist * math.cos(math.radians(self.yaw))
-            self.pos["y"] += dist * math.sin(math.radians(self.yaw))
+            # With 0° pointing along +Y axis: x = dist * sin(yaw), y = dist * cos(yaw)
+            self.pos["x"] += dist * math.sin(math.radians(self.yaw))
+            self.pos["y"] += dist * math.cos(math.radians(self.yaw))
 
         elif command == "move_back":
             # Move opposite to current heading
-            self.pos["x"] -= dist * math.cos(math.radians(self.yaw))
-            self.pos["y"] -= dist * math.sin(math.radians(self.yaw))
+            self.pos["x"] -= dist * math.sin(math.radians(self.yaw))
+            self.pos["y"] -= dist * math.cos(math.radians(self.yaw))
 
         elif command == "move_left":
             # Move perpendicular left to current heading
-            self.pos["x"] += dist * math.cos(math.radians(self.yaw - 90))
-            self.pos["y"] += dist * math.sin(math.radians(self.yaw - 90))
+            self.pos["x"] += dist * math.sin(math.radians(self.yaw - 90))
+            self.pos["y"] += dist * math.cos(math.radians(self.yaw - 90))
 
         elif command == "move_right":
             # Move perpendicular right to current heading
-            self.pos["x"] += dist * math.cos(math.radians(self.yaw + 90))
-            self.pos["y"] += dist * math.sin(math.radians(self.yaw + 90))
+            self.pos["x"] += dist * math.sin(math.radians(self.yaw + 90))
+            self.pos["y"] += dist * math.cos(math.radians(self.yaw + 90))
 
         elif command == "move_up":
             self.pos["z"] += dist
@@ -68,17 +70,21 @@ class PositionEstimator:
             self.pos["z"] -= dist
 
         elif command == "rotate_cw":
-            self.yaw = (self.yaw + params.get("degrees", 0)) % 360
+            # Disabled: yaw tracking unreliable, trust rotation command without verification
+            # self.yaw = (self.yaw + params.get("degrees", 0)) % 360
+            pass
 
         elif command == "rotate_ccw":
-            self.yaw = (self.yaw - params.get("degrees", 0)) % 360
+            # Disabled: yaw tracking unreliable, trust rotation command without verification
+            # self.yaw = (self.yaw - params.get("degrees", 0)) % 360
+            pass
 
     def update_yaw(self, yaw_from_telemetry: float):
         """
-        Update yaw from drone's IMU - more accurate than dead reckoning.
+        Update yaw from external source.
 
         Args:
-            yaw_from_telemetry: Yaw angle in degrees from drone
+            yaw_from_telemetry: Yaw angle in degrees
         """
         self.yaw = yaw_from_telemetry
 
@@ -101,30 +107,28 @@ class PositionEstimator:
 class PathExecutor:
     """Main path execution coordinator with obstacle avoidance"""
 
-    def __init__(self, drone_controller, state_manager, video_handler, config: Config = Config()):
+    def __init__(self, tello, video_handler, config: Config = Config()):
         """
         Initialize path executor.
 
         Args:
-            drone_controller: DroneController instance from tello_server
-            state_manager: StateManager instance from tello_server
-            video_handler: VideoStreamHandler instance from tello_server
+            tello: DJITelloPy Tello instance
+            video_handler: VideoStreamHandler instance
             config: Configuration object
         """
-        self.drone = drone_controller
-        self.state = state_manager
+        self.tello = tello
         self.config = config
 
         # Initialize components
         self.position = PositionEstimator()
         self.video_proc = VideoProcessor(video_handler)
         self.detector = ObstacleDetector(config)
-        self.circumvent = ObstacleCircumvention(drone_controller, self.position, config)
+        self.circumvent = ObstacleCircumvention(tello, self.position, config)
 
         self.running = False
         self.start_time = None
         self.waypoint_callback = None  # Callback for waypoint updates
-        self.use_imu = True  # Use IMU data by default
+        self.rotated_for_waypoint = False  # Track if we've rotated for current waypoint
 
     def set_waypoint_callback(self, callback):
         """Set callback function for waypoint progress updates"""
@@ -137,13 +141,15 @@ class PathExecutor:
         Returns:
             True if safe to continue, False otherwise
         """
-        state = self.state.get_state()
-
         # Check battery
-        battery = state.get("battery", 0)
+        try:
+            battery = self.tello.get_battery()
+        except:
+            battery = 100  # Assume OK if can't read
+
         if battery < self.config.MIN_BATTERY_PERCENT:
             print(f"\n[!] CRITICAL: Battery at {battery}% - Emergency landing!")
-            self.drone.send_command("land")
+            self.tello.land()
             return False
         elif battery < self.config.MIN_BATTERY_WARNING:
             print(f"[!] WARNING: Battery low ({battery}%)")
@@ -153,7 +159,7 @@ class PathExecutor:
             elapsed = time.time() - self.start_time
             if elapsed > self.config.MAX_FLIGHT_TIME:
                 print(f"\n[!] Max flight time exceeded ({elapsed:.0f}s) - Landing!")
-                self.drone.send_command("land")
+                self.tello.land()
                 return False
 
         return True
@@ -212,88 +218,70 @@ class PathExecutor:
         # Prioritize vertical movement first (safer)
         if abs(dz) > self.config.WAYPOINT_TOLERANCE:
             # Use very slow vertical movements for better stability
-            distance = min(abs(dz), 25)  # Max 25cm per step (very slow)
+            distance = min(abs(dz), 20)  # Max 20cm per step (slow for stability)
             distance = max(distance, self.config.MIN_STEP_DISTANCE)
 
-            # Even slower when IMU is disabled
-            if not self.use_imu:
-                distance = min(distance, 20)  # Max 20cm per step without IMU
-
-            if dz > 0:
-                command = "move_up"
-            else:
-                command = "move_down"
-
-            success, msg = self.drone.send_command(command, distance=int(distance))
-            if success:
-                self.position.update_from_command(command, {"distance": int(distance)})
-                time.sleep(1.0)  # Wait for stability
-            return success
+            try:
+                if dz > 0:
+                    TelloSafeCommands.move_up(self.tello, int(distance))
+                else:
+                    TelloSafeCommands.move_down(self.tello, int(distance))
+                self.position.update_from_command("move_up" if dz > 0 else "move_down", {"distance": int(distance)})
+                return True
+            except Exception as e:
+                print(f"[!] Vertical movement failed: {e}")
+                return False
 
         # Then handle horizontal movement
         # Calculate distance and angle to target
         horizontal_dist = math.sqrt(dx**2 + dy**2)
 
         if horizontal_dist > self.config.WAYPOINT_TOLERANCE:
-            # Calculate angle to target
-            target_angle = math.degrees(math.atan2(dy, dx))
-            angle_diff = target_angle - self.position.yaw
+            # Rotate once at the start to face target, then just move forward
+            # Only rotate if we haven't already rotated for this waypoint
+            if not self.rotated_for_waypoint:
+                # Calculate angle to target
+                # Adjust coordinate frame: 0° should point along +Y axis (forward), not +X axis
+                # Standard atan2(dy, dx) gives 0° for +X, but we want 0° for +Y
+                # So we use atan2(dx, dy) which gives 0° for +Y, 90° for +X
+                target_angle = math.degrees(math.atan2(dx, dy))
+                angle_diff = target_angle - self.position.yaw
 
-            # Normalize angle to [-180, 180]
-            while angle_diff > 180:
-                angle_diff -= 360
-            while angle_diff < -180:
-                angle_diff += 360
+                # Normalize angle to [-180, 180] using robust modulo arithmetic
+                angle_diff = ((angle_diff + 180) % 360) - 180
 
-            # If we need to turn significantly, rotate first
-            # Use larger tolerance when IMU is disabled to avoid rotation loops
-            rotation_threshold = 25 if not self.use_imu else 15
-            if abs(angle_diff) > rotation_threshold:
-                # Very slow rotations - max 30 degrees per step
-                rotation = min(abs(angle_diff), 30)  # Max 30 degrees per step (very slow)
-
-                # Even slower when IMU is disabled
-                if not self.use_imu:
-                    rotation = min(rotation, 25)  # Max 25 degrees per step without IMU
-
-                rotation = max(rotation, 15)  # Minimum 15 degrees
-
-                imu_status = "IMU ENABLED" if self.use_imu else "DEAD RECKONING"
-                print(f"[ROTATE] ({imu_status}) Current yaw: {self.position.yaw:.1f}°, Target angle: {target_angle:.1f}°, "
-                      f"Need to rotate: {angle_diff:.1f}°, Will rotate: {rotation:.1f}°")
+                # Rotate to face target - trust it works, don't verify
+                ROTATION_THRESHOLD = 5  # degrees - rotate even for small angles
+                if abs(angle_diff) > ROTATION_THRESHOLD:
+                    print(f"[ROTATE] Rotating {angle_diff:.1f}° to face target")
+                    try:
+                        if angle_diff > 0:
+                            TelloSafeCommands.rotate_counter_clockwise(self.tello, int(abs(angle_diff)))
+                        else:
+                            TelloSafeCommands.rotate_clockwise(self.tello, int(abs(angle_diff)))
+                        
+                        # Update estimated yaw and mark rotation complete
+                        self.position.yaw = target_angle
+                        print(f"[ROTATE] Rotation complete, now facing target")
+                    except Exception as e:
+                        print(f"[!] Rotation failed: {e}")
+                        return False
                 
-                # Ensure drone is stable before rotation
-                print("[ROTATE] Stabilizing before rotation...")
-                time.sleep(1.0)  # Wait for drone to stabilize (reduced to avoid auto-land)
-
-                if angle_diff > 0:
-                    success, msg = self.drone.send_command("rotate_ccw", degrees=int(rotation))
-                    if success:
-                        self.position.update_from_command("rotate_ccw", {"degrees": int(rotation)})
-                else:
-                    success, msg = self.drone.send_command("rotate_cw", degrees=int(rotation))
-                    if success:
-                        self.position.update_from_command("rotate_cw", {"degrees": int(rotation)})
-
-                # Wait for rotation to complete and stabilize
-                print("[ROTATE] Waiting for stabilization after rotation...")
-                time.sleep(2.0)  # Wait 2 seconds for stabilization
-                return success
+                # Mark that we've rotated for this waypoint
+                self.rotated_for_waypoint = True
 
             # Move forward toward target
-            # Use very slow horizontal movements for better accuracy
-            distance = min(horizontal_dist, 25)  # Max 25cm per step (very slow)
+            # Use slow horizontal movements for better accuracy
+            distance = min(horizontal_dist, 20)  # Max 20cm per step
             distance = max(distance, self.config.MIN_STEP_DISTANCE)
 
-            # Even slower when IMU is disabled
-            if not self.use_imu:
-                distance = min(distance, 20)  # Max 20cm per step without IMU
-
-            success, msg = self.drone.send_command("move_forward", distance=int(distance))
-            if success:
+            try:
+                TelloSafeCommands.move_forward(self.tello, int(distance))
                 self.position.update_from_command("move_forward", {"distance": int(distance)})
-                time.sleep(1.0)  # Wait for stability
-            return success
+                return True
+            except Exception as e:
+                print(f"[!] Forward movement failed: {e}")
+                return False
 
         return True
 
@@ -325,17 +313,89 @@ class PathExecutor:
         if self.waypoint_callback:
             self.waypoint_callback(waypoints, 0)
 
+        # Initialize current_pos to avoid undefined variable errors
+        current_pos = self.position.get_position()
+
         try:
             # First waypoint - takeoff if needed
             if waypoints[0][2] > 0:
-                print("[*] Taking off...")
-                success, msg = self.drone.send_command("takeoff")
-                if not success:
-                    print(f"[!] Takeoff failed: {msg}")
+                print("\n" + "="*60)
+                print("PRE-TAKEOFF DIAGNOSTICS")
+                print("="*60)
+
+                # Get current drone state
+                try:
+                    battery = self.tello.get_battery()
+                    height = self.tello.get_height()
+                    temp = self.tello.get_temperature()
+                    print(f"[STATE] Battery: {battery}%")
+                    print(f"[STATE] Height: {height}cm")
+                    print(f"[STATE] Temperature: {temp}°C")
+
+                    # Check if drone is already flying
+                    if height > 10:
+                        print(f"[WARN] Drone reports non-zero height: {height}cm")
+                        print("[WARN] Drone may already be airborne or sensor issue")
+                except Exception as e:
+                    print(f"[WARN] Could not read some telemetry: {e}")
+
+                print(f"\n[PLAN] Target takeoff altitude: {waypoints[0][2]}cm")
+                print("="*60 + "\n")
+
+                print("[*] Initiating takeoff sequence...")
+                try:
+                    self.tello.takeoff()
+                    print("[+] Takeoff command accepted")
+                except Exception as e:
+                    print(f"\n[!] TAKEOFF FAILED: {e}")
+                    print("[!] Possible reasons:")
+                    print("    1. Drone hardware issue (motors, propellers)")
+                    print("    2. Battery too low to take off")
+                    print("    3. Drone not on flat surface")
+                    print("    4. Communication timeout")
+                    print("    5. Drone in error state - try restarting")
+
+                    # Additional diagnostics
+                    print("\n[DIAG] Post-failure drone state:")
+                    try:
+                        battery = self.tello.get_battery()
+                        height = self.tello.get_height()
+                        print(f"[DIAG] Battery: {battery}%")
+                        print(f"[DIAG] Height: {height}cm")
+                    except:
+                        print("[DIAG] Could not read drone state")
                     return False
-                print("[*] Waiting for IMU to stabilize after takeoff...")
-                time.sleep(5)  # Wait for takeoff to complete AND IMU to stabilize
-                print("[+] IMU stable, ready for navigation")
+                print("\n[*] Waiting for drone to stabilize after takeoff...")
+                print("[INFO] Monitoring drone stabilization...")
+
+                # Monitor stabilization with progress
+                for i in range(5, 0, -1):
+                    time.sleep(1)
+                    try:
+                        height = self.tello.get_height()
+                        battery = self.tello.get_battery()
+                        print(f"[{6-i}/5] Height: {height}cm, Battery: {battery}%, {i}s remaining...")
+                    except:
+                        print(f"[{6-i}/5] {i}s remaining...")
+
+                print("[+] Stabilization complete")
+
+                # Verify we're actually airborne
+                try:
+                    final_height = self.tello.get_height()
+                    print(f"\n[VERIFY] Final height after stabilization: {final_height}cm")
+
+                    if final_height < 20:
+                        print(f"[WARN] Height is lower than expected ({final_height}cm)")
+                        print("[WARN] Drone may not have taken off properly")
+                        print("[WARN] Proceeding anyway, but watch for issues...")
+                    else:
+                        print(f"[SUCCESS] Drone confirmed airborne at {final_height}cm")
+                except:
+                    print("[WARN] Could not verify height after takeoff")
+
+                print("[+] Ready for navigation")
+                print("="*60 + "\n")
                 self.position.reset_position(0, 0, waypoints[0][2])
 
             # Navigate to each waypoint
@@ -343,6 +403,9 @@ class PathExecutor:
                 if not self.running:
                     print("\n[!] Path execution stopped")
                     break
+
+                # Reset rotation flag for new waypoint
+                self.rotated_for_waypoint = False
 
                 # Notify waypoint progress
                 if self.waypoint_callback:
@@ -355,9 +418,12 @@ class PathExecutor:
                 # Special handling for landing waypoint (z=0)
                 if waypoint[2] == 0:
                     print("[*] Landing...")
-                    self.drone.send_command("land")
-                    time.sleep(3)
-                    print("[+] Landed successfully")
+                    try:
+                        self.tello.land()
+                        time.sleep(3)
+                        print("[+] Landed successfully")
+                    except Exception as e:
+                        print(f"[!] Landing failed: {e}")
                     continue
 
                 # Navigate to waypoint with obstacle avoidance
@@ -365,15 +431,6 @@ class PathExecutor:
                     if not self.safety_check():
                         print("\n[!] Safety check failed - aborting")
                         return False
-
-                    # Update yaw from telemetry (only if IMU is enabled and telemetry is non-zero)
-                    # This prevents overwriting our dead-reckoning yaw with stale telemetry
-                    if self.use_imu:
-                        state = self.state.get_state()
-                        telemetry_yaw = state.get("orientation", {}).get("yaw", 0)
-                        # Only trust telemetry if it's significantly different (IMU has caught up)
-                        if abs(telemetry_yaw - self.position.yaw) > 5 or abs(self.position.yaw) < 1:
-                            self.position.update_yaw(telemetry_yaw)
 
                     # Get current position
                     current_pos = self.position.get_position()
@@ -407,8 +464,6 @@ class PathExecutor:
                         print("[!] Movement failed")
                         return False
 
-                    time.sleep(0.1)  # Small delay between movements
-
                 print(f"[+] Reached waypoint {i+1}/{len(waypoints)}")
 
             # Path completed
@@ -423,7 +478,10 @@ class PathExecutor:
 
         except KeyboardInterrupt:
             print("\n[!] Keyboard interrupt - Emergency landing")
-            self.drone.send_command("land")
+            try:
+                self.tello.land()
+            except:
+                pass
             return False
 
         except Exception as e:
@@ -431,7 +489,10 @@ class PathExecutor:
             import traceback
             traceback.print_exc()
             print("[!] Emergency landing")
-            self.drone.send_command("land")
+            try:
+                self.tello.land()
+            except:
+                pass
             return False
 
         finally:

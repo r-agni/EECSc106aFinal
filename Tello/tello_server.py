@@ -126,24 +126,46 @@ class DroneController:
         """Initialize Tello SDK connection with retry logic."""
         for attempt in range(1, retry_count + 1):
             try:
-                print(f"[*] Initializing Tello connection (attempt {attempt}/{retry_count})...")
+                print(f"\n[*] Initializing Tello SDK connection (attempt {attempt}/{retry_count})...")
+                print(f"[INFO] Creating Tello object...")
                 self.tello = Tello()
 
-                print("[*] Sending SDK mode command...")
+                print("[INFO] Sending 'command' to enter SDK mode...")
+                print("[INFO] Waiting for response from 192.168.10.1:8889...")
+                start_time = time.time()
+
                 self.tello.connect()
 
-                print("[*] Getting battery status...")
-                battery = self.tello.get_battery()
-                print(f"[+] Connected! Battery: {battery}%")
+                elapsed = time.time() - start_time
+                print(f"[+] SDK mode activated in {elapsed:.2f}s")
 
-                # IMU CALIBRATION - Critical for rotation commands
-                print("[*] Waiting for IMU calibration...")
+                print("\n[*] Reading drone telemetry...")
+                battery = self.tello.get_battery()
+                print(f"[+] Battery level: {battery}%")
+
+                # Additional telemetry for diagnostics
+                try:
+                    height = self.tello.get_height()
+                    print(f"[INFO] Current height: {height}cm")
+
+                    temp = self.tello.get_temperature()
+                    print(f"[INFO] Temperature: {temp}°C")
+
+                    flight_time = self.tello.get_flight_time()
+                    print(f"[INFO] Flight time: {flight_time}s")
+
+                except Exception as telem_error:
+                    print(f"[WARN] Some telemetry unavailable: {telem_error}")
+
+                print(f"\n[SUCCESS] Drone connected successfully!")
+
+                # Wait for drone to stabilize
+                print("[*] Waiting for drone to stabilize...")
                 print("[!] IMPORTANT: Keep drone on a FLAT, STABLE surface!")
-                print("    (This prevents 'No valid imu' errors during flight)")
                 for i in range(8, 0, -1):
-                    print(f"    Calibrating... {i}s", end="\r")
+                    print(f"    Stabilizing... {i}s", end="\r")
                     time.sleep(1)
-                print("    Calibration complete!     ")
+                print("    Stabilization complete!     ")
 
                 self.state_manager.set_connection_status("connected")
                 self.state_manager.update(battery=battery)
@@ -156,17 +178,56 @@ class DroneController:
                 return True
 
             except Exception as e:
-                print(f"[!] Connection attempt {attempt} failed: {e}")
+                elapsed = time.time() - start_time if 'start_time' in locals() else 0
+                print(f"\n[!] Connection attempt {attempt} FAILED after {elapsed:.2f}s")
+                print(f"[ERROR] Exception type: {type(e).__name__}")
+                print(f"[ERROR] Error message: {str(e)}")
+
+                # Provide specific guidance based on error type
+                error_str = str(e).lower()
+                if "timeout" in error_str:
+                    print("\n[DIAGNOSE] Timeout Error Detected:")
+                    print("  - Drone is not responding to SDK commands")
+                    print("  - Check WiFi connection to Tello network")
+                    print("  - Verify drone is powered ON")
+                    print("  - Try: ping 192.168.10.1 to test connectivity")
+                elif "refused" in error_str or "unreachable" in error_str:
+                    print("\n[DIAGNOSE] Connection Refused/Unreachable:")
+                    print("  - Drone may not be on Tello network")
+                    print("  - Check Windows WiFi connection")
+                    print("  - Ensure you're on TELLO-xxxxxx network")
+                elif "permission" in error_str:
+                    print("\n[DIAGNOSE] Permission Error:")
+                    print("  - Firewall may be blocking UDP ports")
+                    print("  - Run as administrator or check firewall settings")
+                else:
+                    print("\n[DIAGNOSE] General Connection Error:")
+                    print("  - Unknown error occurred")
+
                 if attempt < retry_count:
-                    print(f"[*] Retrying in 3 seconds...")
+                    print(f"\n[*] Retrying in 3 seconds... ({retry_count - attempt} attempts remaining)")
                     time.sleep(3)
                 else:
-                    print("[!] All connection attempts failed")
-                    print("[!] Troubleshooting tips:")
-                    print("    1. Ensure Tello is powered ON and WiFi LED is blinking")
-                    print("    2. Make sure you're connected to Tello WiFi network")
-                    print("    3. Try restarting the Tello drone")
-                    print("    4. Check if another program is using the Tello")
+                    print("\n" + "="*60)
+                    print("ALL CONNECTION ATTEMPTS FAILED")
+                    print("="*60)
+                    print("[!] Comprehensive troubleshooting checklist:")
+                    print("    1. Ensure Tello drone is powered ON")
+                    print("    2. Wait for WiFi LED to blink (ready state)")
+                    print("    3. Verify connection to Tello WiFi network")
+                    print("       - Open Windows WiFi settings")
+                    print("       - Should be on network 'TELLO-xxxxxx'")
+                    print("    4. Test network connectivity:")
+                    print("       - Open command prompt")
+                    print("       - Run: ping 192.168.10.1")
+                    print("       - Should receive replies")
+                    print("    5. Check for conflicts:")
+                    print("       - Close other drone apps/programs")
+                    print("       - Only one app can connect at a time")
+                    print("    6. Restart the drone (power cycle)")
+                    print("    7. Check firewall settings for UDP ports 8889, 8890, 11111")
+                    print("    8. Try restarting your computer")
+                    print("="*60)
                     self.state_manager.set_connection_status("error")
 
         return False
@@ -197,9 +258,105 @@ class DroneController:
         with self._command_lock:
             try:
                 if command == "takeoff":
-                    self.tello.takeoff()
-                    self.state_manager.set_flying(True)
-                    msg = "Takeoff successful"
+                    print("\n" + "="*60)
+                    print("TAKEOFF COMMAND INITIATED")
+                    print("="*60)
+
+                    # Pre-flight diagnostics
+                    print("[DIAG] Checking drone state before takeoff...")
+                    try:
+                        battery = self.tello.get_battery()
+                        print(f"[DIAG] Battery: {battery}%")
+
+                        height = self.tello.get_height()
+                        print(f"[DIAG] Current height: {height}cm")
+
+                        temp = self.tello.get_temperature()
+                        print(f"[DIAG] Temperature: {temp}°C")
+
+                        flight_time = self.tello.get_flight_time()
+                        print(f"[DIAG] Flight time: {flight_time}s")
+
+                        # Check if already flying
+                        if height > 10:
+                            print(f"[WARN] Drone appears to be already airborne (height: {height}cm)")
+
+                        # Check battery
+                        if battery < 10:
+                            print(f"[ERROR] Battery critically low: {battery}%")
+                            return False, f"Battery too low for takeoff: {battery}%"
+                        elif battery < 20:
+                            print(f"[WARN] Battery low: {battery}%")
+
+                    except Exception as e:
+                        print(f"[WARN] Could not read some telemetry: {e}")
+
+                    print("\n[CMD] Sending takeoff command to drone...")
+                    print("[INFO] Please ensure:")
+                    print("  - Drone is on a flat, stable surface")
+                    print("  - Propellers are unobstructed")
+                    print("  - Sufficient clearance above drone (>2m)")
+                    print("  - Battery is charged")
+
+                    # Send takeoff command with timeout monitoring
+                    print("\n[EXEC] Executing takeoff...")
+                    start_time = time.time()
+
+                    try:
+                        self.tello.takeoff()
+                        elapsed = time.time() - start_time
+                        print(f"[SUCCESS] Takeoff command completed in {elapsed:.2f}s")
+
+                        # Verify takeoff by checking height
+                        time.sleep(1)
+                        new_height = self.tello.get_height()
+                        print(f"[VERIFY] Post-takeoff height: {new_height}cm")
+
+                        if new_height < 20:
+                            print(f"[WARN] Height lower than expected ({new_height}cm). Drone may not have taken off properly.")
+                            print("[WARN] Common issues:")
+                            print("  - Drone on uneven surface")
+                            print("  - Low battery affecting motors")
+                            print("  - Motor or propeller issues")
+                            print("  - Drone not stable (keep drone still)")
+                        else:
+                            print(f"[SUCCESS] Drone is airborne at {new_height}cm")
+
+                        self.state_manager.set_flying(True)
+                        msg = f"Takeoff successful - altitude: {new_height}cm"
+                        print("="*60 + "\n")
+
+                    except Exception as takeoff_error:
+                        elapsed = time.time() - start_time
+                        print(f"\n[ERROR] Takeoff failed after {elapsed:.2f}s")
+                        print(f"[ERROR] Error details: {str(takeoff_error)}")
+                        print(f"[ERROR] Error type: {type(takeoff_error).__name__}")
+
+                        # Provide specific troubleshooting based on error
+                        error_str = str(takeoff_error).lower()
+                        if "timeout" in error_str:
+                            print("\n[TROUBLESHOOT] Timeout detected:")
+                            print("  - Drone may not be responding to commands")
+                            print("  - Check WiFi connection strength")
+                            print("  - Restart the drone and try again")
+                        elif "emergency" in error_str or "motor" in error_str:
+                            print("\n[TROUBLESHOOT] Motor/Emergency issue:")
+                            print("  - Check propellers are attached correctly")
+                            print("  - Ensure propellers can spin freely")
+                            print("  - Check for obstructions")
+                        elif "battery" in error_str:
+                            print("\n[TROUBLESHOOT] Battery issue:")
+                            print("  - Battery may be too low")
+                            print("  - Charge the battery fully")
+                        else:
+                            print("\n[TROUBLESHOOT] General troubleshooting:")
+                            print("  - Restart the drone (power off/on)")
+                            print("  - Ensure drone is on flat surface")
+                            print("  - Check all propellers are secure")
+                            print("  - Verify WiFi connection is stable")
+
+                        print("="*60 + "\n")
+                        raise  # Re-raise to be caught by outer handler
 
                 elif command == "land":
                     self.tello.land()
@@ -209,72 +366,52 @@ class DroneController:
                 elif command == "move_forward":
                     distance = params.get("distance", 20)
                     self.tello.move_forward(distance)
+                    time.sleep(3.5)  # Wait for drone to stabilize
                     msg = f"Moved forward {distance}cm"
 
                 elif command == "move_back":
                     distance = params.get("distance", 20)
                     self.tello.move_back(distance)
+                    time.sleep(3.5)  # Wait for drone to stabilize
                     msg = f"Moved back {distance}cm"
 
                 elif command == "move_left":
                     distance = params.get("distance", 20)
                     self.tello.move_left(distance)
+                    time.sleep(3.5)  # Wait for drone to stabilize
                     msg = f"Moved left {distance}cm"
 
                 elif command == "move_right":
                     distance = params.get("distance", 20)
                     self.tello.move_right(distance)
+                    time.sleep(3.5)  # Wait for drone to stabilize
                     msg = f"Moved right {distance}cm"
 
                 elif command == "move_up":
                     distance = params.get("distance", 20)
                     self.tello.move_up(distance)
+                    time.sleep(3.5)  # Wait for drone to stabilize
                     msg = f"Moved up {distance}cm"
 
                 elif command == "move_down":
                     distance = params.get("distance", 20)
                     self.tello.move_down(distance)
+                    time.sleep(3.5)  # Wait for drone to stabilize
                     msg = f"Moved down {distance}cm"
 
                 elif command == "rotate_cw":
                     degrees = params.get("degrees", 30)
-                    # Add delay before rotation to ensure IMU is stable
-                    time.sleep(1.0)  # Increased from 0.3s to 1.0s
-                    
-                    # Retry logic for IMU errors
-                    max_retries = 3
-                    for attempt in range(max_retries):
-                        try:
-                            self.tello.rotate_clockwise(degrees)
-                            msg = f"Rotated clockwise {degrees}°"
-                            break
-                        except Exception as e:
-                            error_str = str(e).lower()
-                            if "no valid imu" in error_str and attempt < max_retries - 1:
-                                print(f"[!] IMU not ready (attempt {attempt + 1}/{max_retries}), waiting 3s...")
-                                time.sleep(3.0)  # Wait for IMU to stabilize
-                            else:
-                                raise  # Re-raise if not IMU error or final attempt
+                    # Add delay before rotation for stability
+                    time.sleep(1.0)
+                    self.tello.rotate_clockwise(degrees)
+                    msg = f"Rotated clockwise {degrees}°"
 
                 elif command == "rotate_ccw":
                     degrees = params.get("degrees", 30)
-                    # Add delay before rotation to ensure IMU is stable
-                    time.sleep(1.0)  # Increased from 0.3s to 1.0s
-                    
-                    # Retry logic for IMU errors
-                    max_retries = 3
-                    for attempt in range(max_retries):
-                        try:
-                            self.tello.rotate_counter_clockwise(degrees)
-                            msg = f"Rotated counter-clockwise {degrees}°"
-                            break
-                        except Exception as e:
-                            error_str = str(e).lower()
-                            if "no valid imu" in error_str and attempt < max_retries - 1:
-                                print(f"[!] IMU not ready (attempt {attempt + 1}/{max_retries}), waiting 3s...")
-                                time.sleep(3.0)  # Wait for IMU to stabilize
-                            else:
-                                raise  # Re-raise if not IMU error or final attempt
+                    # Add delay before rotation for stability
+                    time.sleep(1.0)
+                    self.tello.rotate_counter_clockwise(degrees)
+                    msg = f"Rotated counter-clockwise {degrees}°"
 
                 elif command == "emergency":
                     self.tello.emergency()

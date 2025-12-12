@@ -7,8 +7,14 @@ returns to the exact position it would have been at if no obstacle existed.
 
 import time
 from typing import List, Tuple, Dict
+import sys
+import os
 
 from .config import Config
+
+# Add parent directory to path to import tello_commands
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tello_commands import TelloSafeCommands
 
 
 class ObstacleCircumvention:
@@ -18,16 +24,16 @@ class ObstacleCircumvention:
     CRITICAL: All maneuvers are designed to return drone to exact planned path position.
     """
 
-    def __init__(self, drone_controller, position_estimator, config: Config = Config()):
+    def __init__(self, tello, position_estimator, config: Config = Config()):
         """
         Initialize circumvention system.
 
         Args:
-            drone_controller: DroneController instance from tello_server
+            tello: DJITelloPy Tello instance
             position_estimator: PositionEstimator instance for tracking
             config: Configuration object
         """
-        self.drone = drone_controller
+        self.tello = tello
         self.position = position_estimator
         self.config = config
         self.state = "IDLE"
@@ -183,18 +189,32 @@ class ObstacleCircumvention:
         for i, (command, distance) in enumerate(maneuver, 1):
             print(f"  Step {i}/{len(maneuver)}: {command} {distance}cm")
 
-            success, msg = self.drone.send_command(command, distance=distance)
+            try:
+                # Map command names to safe DJITelloPy methods (with IMU fallback)
+                if command == "move_forward":
+                    TelloSafeCommands.move_forward(self.tello, distance)
+                elif command == "move_back":
+                    TelloSafeCommands.move_back(self.tello, distance)
+                elif command == "move_left":
+                    TelloSafeCommands.move_left(self.tello, distance)
+                elif command == "move_right":
+                    TelloSafeCommands.move_right(self.tello, distance)
+                elif command == "move_up":
+                    TelloSafeCommands.move_up(self.tello, distance)
+                elif command == "move_down":
+                    TelloSafeCommands.move_down(self.tello, distance)
+                else:
+                    print(f"[!] Unknown command: {command}")
+                    self.state = "IDLE"
+                    return False
 
-            if not success:
-                print(f"[!] Maneuver failed at step {i}: {msg}")
+                # Update position estimate
+                self.position.update_from_command(command, {"distance": distance})
+
+            except Exception as e:
+                print(f"[!] Maneuver failed at step {i}: {e}")
                 self.state = "IDLE"
                 return False
-
-            # Update position estimate
-            self.position.update_from_command(command, {"distance": distance})
-
-            # Allow drone to stabilize between movements
-            time.sleep(0.8)
 
         # Verify position after maneuver
         pos_after = self.position.get_position()

@@ -28,7 +28,8 @@ import argparse
 import math
 import keyboard
 import threading
-from tello_server import DroneController, StateManager, VideoStreamHandler
+from djitellopy import Tello
+from drone_wrapper import TelloConnection, VideoStreamHandler
 from obstacle_avoidance.path_executor import PositionEstimator
 from obstacle_avoidance.config import Config
 from obstacle_avoidance.obstacle_detector import ObstacleDetector
@@ -50,9 +51,10 @@ class WASDController:
             enable_live_map: Enable live navigation map visualization
         """
         self.config = Config()
-        self.state_mgr = StateManager()
-        self.drone_ctrl = DroneController(self.state_mgr)
-        self.video_handler = VideoStreamHandler(enable_http_stream=enable_video_stream, http_port=http_port)
+        self.tello = None
+        self.video_handler = None
+        self.enable_video_stream = enable_video_stream
+        self.http_port = http_port
         self.detector = None
         self.video_proc = None
         self.live_map = None
@@ -78,26 +80,34 @@ class WASDController:
 
         # Connect to WiFi
         print("\n[STEP 1] Connecting to Tello WiFi...")
-        if not self.drone_ctrl.connect_wifi():
+        if not TelloConnection.connect_wifi():
             print("[!] WiFi connection failed")
             return False
 
         # Connect to drone
         print("\n[STEP 2] Connecting to drone...")
-        if not self.drone_ctrl.connect_drone():
-            print("[!] Drone connection failed")
+        try:
+            self.tello = Tello()
+            self.tello.connect()
+            print("[+] Drone connected")
+        except Exception as e:
+            print(f"[!] Drone connection failed: {e}")
             return False
 
         # Check battery
-        battery = self.state_mgr.get_state().get("battery", 0)
-        if battery < 30:
-            print(f"[!] Battery too low ({battery}%) - need at least 30%")
-            return False
-        print(f"[+] Battery: {battery}%")
+        try:
+            battery = self.tello.get_battery()
+            if battery < 30:
+                print(f"[!] Battery too low ({battery}%) - need at least 30%")
+                return False
+            print(f"[+] Battery: {battery}%")
+        except:
+            print("[WARN] Could not read battery")
 
         # Start video stream
         print("\n[STEP 3] Starting video stream...")
-        self.drone_ctrl.start_video_stream()
+        self.tello.streamon()
+        self.video_handler = VideoStreamHandler(self.tello, enable_http_stream=self.enable_video_stream, http_port=self.http_port)
         self.video_handler.start_stream()
         time.sleep(3)  # Wait for stream to stabilize
 
@@ -172,15 +182,36 @@ class WASDController:
 
     def handle_movement(self, command: str, **params):
         """Execute movement and update position tracking"""
-        success, msg = self.drone_ctrl.send_command(command, **params)
-        if success:
+        try:
+            # Map commands to DJITelloPy methods
+            if command == "move_forward":
+                self.tello.move_forward(params.get("distance", 30))
+            elif command == "move_back":
+                self.tello.move_back(params.get("distance", 30))
+            elif command == "move_left":
+                self.tello.move_left(params.get("distance", 30))
+            elif command == "move_right":
+                self.tello.move_right(params.get("distance", 30))
+            elif command == "move_up":
+                self.tello.move_up(params.get("distance", 30))
+            elif command == "move_down":
+                self.tello.move_down(params.get("distance", 30))
+            elif command == "rotate_ccw":
+                self.tello.rotate_counter_clockwise(params.get("degrees", 30))
+            elif command == "rotate_cw":
+                self.tello.rotate_clockwise(params.get("degrees", 30))
+            else:
+                print(f"[!] Unknown command: {command}")
+                return False
+
             self.position.update_from_command(command, params)
             self.update_dashboard()
             pos = self.position.get_position()
             print(f"[POS] ({pos['x']:.0f}, {pos['y']:.0f}, {pos['z']:.0f}) cm, Yaw: {self.position.yaw:.0f}°")
-        else:
-            print(f"[!] Command failed: {msg}")
-        return success
+            return True
+        except Exception as e:
+            print(f"[!] Command failed: {e}")
+            return False
 
     def start_control_loop(self):
         """Main control loop handling keyboard input"""
@@ -198,23 +229,26 @@ class WASDController:
 
                 elif keyboard.is_pressed('space'):
                     print("\n[!] EMERGENCY STOP")
-                    self.drone_ctrl.send_command("emergency")
+                    try:
+                        self.tello.emergency()
+                    except:
+                        pass
                     self.in_flight = False
                     time.sleep(0.5)
 
                 elif keyboard.is_pressed('t'):
                     if not self.in_flight:
                         print("[*] Taking off...")
-                        success, msg = self.drone_ctrl.send_command("takeoff")
-                        if success:
+                        try:
+                            self.tello.takeoff()
                             self.in_flight = True
                             self.position.reset_position(0, 0, 100)  # Assume 100cm altitude after takeoff
                             if self.live_map:
                                 self.live_map.set_status("MANUAL CONTROL")
                             self.update_dashboard()
                             print("[+] Takeoff successful")
-                        else:
-                            print(f"[!] Takeoff failed: {msg}")
+                        except Exception as e:
+                            print(f"[!] Takeoff failed: {e}")
                         time.sleep(3)  # Wait for takeoff to complete
                     else:
                         print("[!] Already in flight")
@@ -223,8 +257,8 @@ class WASDController:
                 elif keyboard.is_pressed('l'):
                     if self.in_flight:
                         print("[*] Landing...")
-                        success, msg = self.drone_ctrl.send_command("land")
-                        if success:
+                        try:
+                            self.tello.land()
                             self.in_flight = False
                             self.position.reset_position(self.position.pos['x'],
                                                         self.position.pos['y'],
@@ -233,8 +267,8 @@ class WASDController:
                             if self.live_map:
                                 self.live_map.set_status("LANDED")
                             print("[+] Landed")
-                        else:
-                            print(f"[!] Land failed: {msg}")
+                        except Exception as e:
+                            print(f"[!] Land failed: {e}")
                         time.sleep(3)  # Wait for landing to complete
                     else:
                         print("[!] Not in flight")
@@ -299,7 +333,7 @@ class WASDController:
         if self.in_flight:
             print("[!] Drone still in flight - landing...")
             try:
-                self.drone_ctrl.send_command("land")
+                self.tello.land()
                 time.sleep(3)
             except:
                 pass
@@ -308,9 +342,15 @@ class WASDController:
             self.live_map.stop()
         if self.video_handler:
             self.video_handler.stop_stream()
-        if self.drone_ctrl:
-            self.drone_ctrl.stop_video_stream()
-            self.drone_ctrl.disconnect()
+        if self.tello:
+            try:
+                self.tello.streamoff()
+            except:
+                pass
+            try:
+                self.tello.end()
+            except:
+                pass
         print("[+] Shutdown complete")
 
 
