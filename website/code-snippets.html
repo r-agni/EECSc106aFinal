@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Key Code Implementation Snippets for Drone Cooperative System">
+  <meta name="keywords" content="code examples, implementation, Python, YOLOv8, ArUco, PID">
+  <meta name="author" content="Team 14: Agni Rajinikanth, Alan Bao, Nohl Abdelhadi, Imam Majed Alayeh">
+
+  <title>Code Snippets | Drone Cooperative System</title>
+
+  <!-- Stylesheets -->
+  <link rel="stylesheet" href="css/paper.css">
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/responsive.css">
+
+  <!-- MathJax for equation rendering -->
+  <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true
+      },
+      svg: {
+        fontCache: 'global'
+      }
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js" async></script>
+</head>
+<body>
+  <!-- Navigation Bar -->
+  <nav class="navbar">
+    <div class="navbar-container">
+      <a href="./" class="navbar-brand">Team 14 | EECS 106a</a>
+      <div class="nav-links">
+        <a href="index.html">Home</a>
+        <a href="technical.html">Technical Details</a>
+        <a href="design-choices.html">Design Choices</a>
+        <a href="code-snippets.html">Code Snippets</a>
+        <a href="team.html">Team</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <div class="container">
+    <!-- Title Block -->
+    <div class="title-block">
+      <h1 class="title">Implementation Code Snippets</h1>
+      <div class="authors">
+        Team 14: Agni Rajinikanth, Alan Bao, Nohl Abdelhadi, Imam Majed Alayeh
+      </div>
+      <div class="affiliation">
+        UC Berkeley | EECS/ME 106a: Introduction to Robotics | Fall 2025
+      </div>
+    </div>
+
+    <!-- Introduction -->
+    <section class="section">
+      <h2 class="section-title">Overview</h2>
+      <p>
+        This page presents key implementation snippets from our cooperative drone system. All code is written in Python
+        and demonstrates the core algorithms discussed in the technical documentation.
+      </p>
+      <p>
+        <strong>Implementation Language:</strong> Python 3.8+<br>
+        <strong>Key Libraries:</strong> OpenCV, Ultralytics (YOLOv8), NumPy, djitellopy, pyardrone
+      </p>
+    </section>
+
+    <!-- YOLOv8 Detection -->
+    <section class="section">
+      <h2 class="section-title">1. Tello Drone: YOLOv8 Object Detection</h2>
+
+      <div class="algorithm-card">
+        <h3>1.1 Obstacle Detector Initialization</h3>
+        <p>
+          <strong>File:</strong> <code>Tello/obstacle_avoidance/obstacle_detector.py</code>
+        </p>
+
+        <pre><code class="language-python">"""
+Obstacle detection and dimension estimation using YOLOv8.
+"""
+import cv2
+import numpy as np
+from typing import List, Dict
+from ultralytics import YOLO
+
+class ObstacleDetector:
+    """Real-time object detection and distance estimation"""
+
+    def __init__(self, config: Config = Config()):
+        """
+        Initialize obstacle detector with YOLOv8 model.
+
+        Args:
+            config: Configuration object with detection parameters
+        """
+        self.config = config
+        self.frame_count = 0
+
+        # Load YOLOv8 nano model (will download on first run)
+        print(f"[*] Loading YOLO model: {config.YOLO_MODEL}")
+        self.model = YOLO(config.YOLO_MODEL)  # "yolov8n.pt"
+        print("[+] YOLO model loaded successfully")
+
+        self.focal_length = config.FOCAL_LENGTH_PX  # 700 pixels
+        self.object_heights = config.OBJECT_HEIGHTS  # Dictionary of known heights
+</code></pre>
+
+        <h4>Key Points</h4>
+        <ul>
+          <li>Uses YOLOv8-nano model (<code>yolov8n.pt</code>) for real-time performance</li>
+          <li>Ultralytics library automatically downloads model on first run</li>
+          <li>Configuration class stores calibrated focal length (700 pixels)</li>
+          <li>Object heights dictionary enables distance estimation</li>
+        </ul>
+      </div>
+
+      <div class="algorithm-card">
+        <h3>1.2 Object Detection Pipeline</h3>
+
+        <pre><code class="language-python">def detect_objects(self, frame: np.ndarray) -> List[Dict]:
+    """
+    Run YOLO detection on frame.
+
+    Args:
+        frame: Input image (BGR format from OpenCV)
+
+    Returns:
+        List of detected objects with bounding boxes and confidence
+    """
+    # Run YOLOv8 inference
+    results = self.model(frame, conf=self.config.DETECTION_CONFIDENCE, verbose=False)
+
+    detections = []
+    for result in results:
+        boxes = result.boxes
+        for box in boxes:
+            # Extract box data
+            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+            confidence = float(box.conf[0])
+            class_id = int(box.cls[0])
+            class_name = self.model.names[class_id]
+
+            detection = {
+                "bbox": {
+                    "x": int(x1),
+                    "y": int(y1),
+                    "w": int(x2 - x1),
+                    "h": int(y2 - y1),
+                },
+                "class": class_name,
+                "confidence": confidence,
+                "class_id": class_id
+            }
+            detections.append(detection)
+
+    return detections
+</code></pre>
+
+        <h4>Key Points</h4>
+        <ul>
+          <li>Confidence threshold filters low-quality detections (default: 0.5)</li>
+          <li>Returns structured dictionary for each detection</li>
+          <li>Bounding box in XYXY format (top-left, bottom-right corners)</li>
+          <li>Achieves 10-15 FPS on Tello's hardware</li>
+        </ul>
+      </div>
+
+      <div class="algorithm-card">
+        <h3>1.3 Pinhole Camera Distance Estimation</h3>
+
+        <pre><code class="language-python">def estimate_distance(self, bbox_height: int, object_class: str) -> float:
+    """
+    Estimate distance to object using pinhole camera model.
+
+    Formula: distance = (known_height * focal_length) / pixel_height
+
+    Args:
+        bbox_height: Height of bounding box in pixels
+        object_class: Class name of detected object
+
+    Returns:
+        Estimated distance in meters
+    """
+    if bbox_height == 0:
+        return 999.0  # Very far away
+
+    # Get known height for this object class
+    # Example: person = 1.7m, chair = 0.9m, table = 0.75m
+    known_height = self.object_heights.get(
+        object_class,
+        self.object_heights["generic"]  # Default: 1.0m
+    )
+
+    # Calculate distance using pinhole camera model
+    # d = (H × f) / h
+    distance_m = (known_height * self.focal_length) / bbox_height
+
+    return distance_m
+</code></pre>
+
+        <h4>Mathematical Formula</h4>
+        <p>
+          $$d = \frac{H \times f}{h}$$
+        </p>
+        <p>Where:</p>
+        <ul>
+          <li>$d$ = distance to object (meters)</li>
+          <li>$H$ = known real-world height of object (meters)</li>
+          <li>$f$ = focal length of camera (pixels) = 700</li>
+          <li>$h$ = height of object in image (pixels)</li>
+        </ul>
+
+        <h4>Key Points</h4>
+        <ul>
+          <li>Requires known object heights (stored in configuration)</li>
+          <li>Typical error: ±20% at 5m distance</li>
+          <li>Falls back to generic height (1.0m) for unknown objects</li>
+          <li>Computationally trivial (single division)</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ArUco Detection -->
+    <section class="section">
+      <h2 class="section-title">2. AR Drone: ArUco Marker Detection</h2>
+
+      <div class="algorithm-card">
+        <h3>2.1 ArUco Detector Initialization</h3>
+        <p>
+          <strong>File:</strong> <code>AR Drone/aruco_detection/detector.py</code>
+        </p>
+
+        <pre><code class="language-python">"""
+ARuco Marker Detector for AR Drone
+Uses OpenCV's ArUco module for marker detection and pose estimation.
+"""
+import cv2
+import cv2.aruco as aruco
+import numpy as np
+
+class ArucoDetector:
+    """ARuco marker detector using OpenCV."""
+
+    def __init__(self, dictionary=aruco.DICT_4X4_50, target_id=1):
+        """
+        Initialize ARuco detector.
+
+        Args:
+            dictionary: ARuco dictionary type (default: DICT_4X4_50)
+            target_id: Target ARuco marker ID to search for
+        """
+        self.target_id = target_id
+        self.aruco_dict = aruco.getPredefinedDictionary(dictionary)
+        self.aruco_params = aruco.DetectorParameters()
+
+        print(f"[ARUCO] Initialized detector for ID {target_id}")
+        print(f"[ARUCO] Dictionary: {dictionary}")
+</code></pre>
+
+        <h4>Key Points</h4>
+        <ul>
+          <li>Uses OpenCV's built-in ArUco module</li>
+          <li>DICT_4X4_50 provides 50 unique 4×4 bit markers</li>
+          <li>Marker 0 = origin, Marker 1 = target location</li>
+          <li>DetectorParameters uses default optimized settings</li>
+        </ul>
+      </div>
+
+      <div class="algorithm-card">
+        <h3>2.2 Marker Detection and Processing</h3>
+
+        <pre><code class="language-python">def detect(self, frame):
+    """
+    Detect ARuco markers in frame.
+
+    Args:
+        frame: OpenCV BGR image frame
+
+    Returns:
+        list of dict with marker information
+    """
+    # Convert to grayscale for better detection
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+    # Detect markers using OpenCV ArUco detector
+    corners, ids, rejected = aruco.detectMarkers(
+        gray, self.aruco_dict, parameters=self.aruco_params
+    )
+
+    markers = []
+
+    if ids is not None:
+        for i, marker_id in enumerate(ids.flatten()):
+            marker_corners = corners[i][0]
+
+            # Calculate center of marker
+            cx = int(np.mean(marker_corners[:, 0]))
+            cy = int(np.mean(marker_corners[:, 1]))
+
+            # Calculate marker area using cross product
+            x = marker_corners[:, 0]
+            y = marker_corners[:, 1]
+            area = 0.5 * abs(
+                (x[0]*y[1] - x[1]*y[0]) +
+                (x[1]*y[2] - x[2]*y[1]) +
+                (x[2]*y[3] - x[3]*y[2]) +
+                (x[3]*y[0] - x[0]*y[3])
+            )
+
+            markers.append({
+                'id': int(marker_id),
+                'corners': marker_corners,
+                'center': (cx, cy),
+                'area': area
+            })
+
+    return markers
+</code></pre>
+
+        <h4>Key Points</h4>
+        <ul>
+          <li>Grayscale conversion improves detection reliability</li>
+          <li>Returns all detected markers with IDs and corner coordinates</li>
+          <li>Center calculation enables optical centering control</li>
+          <li>Area calculation useful for distance estimation</li>
+          <li>Accuracy: ±2cm at 1m distance</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- PID Controller -->
+    <section class="section">
+      <h2 class="section-title">3. PID Controller Implementation</h2>
+
+      <div class="algorithm-card">
+        <h3>3.1 PID Class Definition</h3>
+        <p>
+          <strong>File:</strong> <code>Tello/pid_controller/position_controller.py</code>
+        </p>
+
+        <pre><code class="language-python">"""
+PID Controller for precise drone position control.
+
+Implements the classic PID control law:
+    u(t) = Kp*e(t) + Ki*∫e(τ)dτ + Kd*de(t)/dt
+"""
+import time
+
+class PIDController:
+    """Single-axis PID controller with anti-windup."""
+
+    def __init__(self, kp: float, ki: float, kd: float,
+                 integral_limit: float = 50.0, deadband: float = 0.0):
+        """
+        Initialize PID controller.
+
+        Args:
+            kp: Proportional gain
+            ki: Integral gain
+            kd: Derivative gain
+            integral_limit: Maximum integral term (anti-windup)
+            deadband: Error threshold below which output is zero
+        """
+        self.kp = kp
+        self.ki = ki
+        self.kd = kd
+        self.integral_limit = integral_limit
+        self.deadband = deadband
+
+        # State variables
+        self.integral = 0.0
+        self.previous_error = 0.0
+        self.previous_time = None
+</code></pre>
+
+        <h4>Tuned Gains for Tello Drone</h4>
+        <ul>
+          <li><strong>Kp = 1.0:</strong> Proportional gain (immediate response)</li>
+          <li><strong>Ki = 0.1:</strong> Integral gain (eliminates steady-state error)</li>
+          <li><strong>Kd = 0.3:</strong> Derivative gain (reduces overshoot)</li>
+          <li><strong>Integral Limit = 50.0:</strong> Prevents integral windup</li>
+        </ul>
+      </div>
+
+      <div class="algorithm-card">
+        <h3>3.2 PID Compute Function</h3>
+
+        <pre><code class="language-python">def compute(self, error: float, current_time: float = None) -> float:
+    """
+    Compute PID control output.
+
+    Args:
+        error: Current error (target - current)
+        current_time: Current timestamp (uses time.time() if None)
+
+    Returns:
+        Control output u(t)
+    """
+    # Get current time if not provided
+    if current_time is None:
+        current_time = time.time()
+
+    # Calculate time delta
+    if self.previous_time is None:
+        dt = 0.0
+    else:
+        dt = current_time - self.previous_time
+
+    # Apply deadband to ignore small errors
+    if abs(error) < self.deadband:
+        error = 0.0
+        self.integral = 0.0  # Reset integral in deadband
+
+    # Proportional term: P = Kp × e(t)
+    p_term = self.kp * error
+
+    # Integral term with anti-windup: I = Ki × ∫e(τ)dτ
+    if dt > 0:
+        self.integral += error * dt
+        # Clamp integral to prevent windup
+        self.integral = max(-self.integral_limit,
+                          min(self.integral, self.integral_limit))
+    i_term = self.ki * self.integral
+
+    # Derivative term: D = Kd × de(t)/dt
+    if dt > 0:
+        derivative = (error - self.previous_error) / dt
+    else:
+        derivative = 0.0
+    d_term = self.kd * derivative
+
+    # Update state for next iteration
+    self.previous_error = error
+    self.previous_time = current_time
+
+    # Compute total output: u(t) = P + I + D
+    output = p_term + i_term + d_term
+
+    return output
+</code></pre>
+
+        <h4>Mathematical Formulation</h4>
+        <p>
+          $$u(t) = K_p \cdot e(t) + K_i \cdot \int_{0}^{t} e(\tau) d\tau + K_d \cdot \frac{de(t)}{dt}$$
+        </p>
+
+        <h4>Key Features</h4>
+        <ul>
+          <li><strong>Anti-Windup:</strong> Clamps integral term to prevent runaway</li>
+          <li><strong>Deadband:</strong> Ignores tiny errors to prevent oscillation</li>
+          <li><strong>Discrete-Time:</strong> Uses Δt for numerical integration/differentiation</li>
+          <li><strong>Performance:</strong> Converges to ±10cm in 2-3 iterations</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Path Planning -->
+    <section class="section">
+      <h2 class="section-title">4. Path Planning Algorithms</h2>
+
+      <div class="algorithm-card">
+        <h3>4.1 Bresenham's Line Algorithm</h3>
+        <p>
+          <strong>File:</strong> <code>Tello/obstacle_avoidance/path_planner.py</code>
+        </p>
+
+        <pre><code class="language-python">def bresenham_line(x0: int, y0: int, x1: int, y1: int) -> List[Tuple[int, int]]:
+    """
+    Generate all integer points on a line using Bresenham's Line Algorithm.
+
+    Classic algorithm for drawing lines on a pixel grid using only
+    integer arithmetic (no floating-point operations).
+
+    Time Complexity: O(max(dx, dy))
+    Space Complexity: O(max(dx, dy))
+
+    Args:
+        x0, y0: Start point coordinates (integers)
+        x1, y1: End point coordinates (integers)
+
+    Returns:
+        List of (x, y) integer coordinate tuples
+
+    Example:
+        >>> bresenham_line(0, 0, 5, 3)
+        [(0,0), (1,1), (2,1), (3,2), (4,2), (5,3)]
+    """
+    points = []
+
+    # Calculate deltas
+    dx = abs(x1 - x0)
+    dy = abs(y1 - y0)
+
+    # Determine step direction
+    sx = 1 if x0 < x1 else -1
+    sy = 1 if y0 < y1 else -1
+
+    # Initialize error accumulator
+    err = dx - dy
+
+    # Current position
+    x, y = x0, y0
+
+    while True:
+        # Add current point to path
+        points.append((x, y))
+
+        # Check if we've reached the end
+        if x == x1 and y == y1:
+            break
+
+        # Calculate error * 2 (avoids floating point)
+        e2 = 2 * err
+
+        # Step in x direction if needed
+        if e2 > -dy:
+            err -= dy
+            x += sx
+
+        # Step in y direction if needed
+        if e2 < dx:
+            err += dx
+            y += sy
+
+    return points
+</code></pre>
+
+        <h4>Algorithm Properties</h4>
+        <ul>
+          <li><strong>Integer-Only:</strong> No floating-point operations (faster)</li>
+          <li><strong>Minimal Error:</strong> Closest integer approximation to ideal line</li>
+          <li><strong>Symmetric:</strong> Same points regardless of direction</li>
+          <li><strong>Efficient:</strong> Linear time complexity</li>
+        </ul>
+      </div>
+
+      <div class="algorithm-card">
+        <h3>4.2 Linear Interpolation Path Generation</h3>
+
+        <pre><code class="language-python">def generate_waypoints_linear(start_x: float, start_y: float,
+                               goal_x: float, goal_y: float,
+                               altitude: float,
+                               num_intermediate: int = 3) -> List[Tuple[float, float, float]]:
+    """
+    Generate waypoints using linear interpolation.
+
+    Creates evenly-spaced waypoints along a straight line from start to goal.
+    Obstacle avoidance is handled reactively during flight.
+
+    Args:
+        start_x, start_y: Starting position (meters)
+        goal_x, goal_y: Goal position (meters)
+        altitude: Flight altitude (meters)
+        num_intermediate: Number of intermediate waypoints
+
+    Returns:
+        List of (x, y, z) waypoint tuples
+    """
+    waypoints = []
+
+    # Add start waypoint
+    waypoints.append((start_x, start_y, altitude))
+
+    # Generate intermediate waypoints
+    for i in range(1, num_intermediate + 1):
+        t = i / (num_intermediate + 1)  # Interpolation parameter [0, 1]
+
+        # Linear interpolation: p(t) = (1-t)·p0 + t·p1
+        x = start_x + t * (goal_x - start_x)
+        y = start_y + t * (goal_y - start_y)
+
+        waypoints.append((x, y, altitude))
+
+    # Add goal waypoint
+    waypoints.append((goal_x, goal_y, altitude))
+
+    # Add landing waypoint (z = 0)
+    waypoints.append((goal_x, goal_y, 0))
+
+    return waypoints
+</code></pre>
+
+        <h4>Hybrid Path Planning Strategy</h4>
+        <p>
+          The Tello Drone uses a <strong>hybrid approach</strong> combining:
+        </p>
+        <ol>
+          <li><strong>Linear Interpolation:</strong> Initial direct path generation (O(1))</li>
+          <li><strong>Bresenham's Algorithm:</strong> Discrete waypoint computation for movement commands</li>
+          <li><strong>Reactive Replanning:</strong> When YOLOv8 detects obstacle, execute dodge then recompute path to goal</li>
+        </ol>
+      </div>
+
+      <div class="algorithm-card">
+        <h3>4.3 Grid Search (Snake Pattern)</h3>
+        <p>
+          <strong>File:</strong> <code>AR Drone/path_planning/grid_search.py</code>
+        </p>
+
+        <pre><code class="language-python">def _generate_snake_pattern(self):
+    """
+    Generate snake/boustrophedon search pattern.
+    Moves left-to-right on even rows, right-to-left on odd rows.
+
+    Example for 5×5 grid:
+        Row 0: → → → → →
+        Row 1: ← ← ← ← ←
+        Row 2: → → → → →
+        Row 3: ← ← ← ← ←
+        Row 4: → → → → →
+    """
+    waypoints = []
+    for row in range(self.grid_size):
+        if row % 2 == 0:
+            # Left to right on even rows
+            for col in range(self.grid_size):
+                waypoints.append((row, col))
+        else:
+            # Right to left on odd rows
+            for col in range(self.grid_size - 1, -1, -1):
+                waypoints.append((row, col))
+    return waypoints
+</code></pre>
+
+        <h4>Grid Search Properties</h4>
+        <ul>
+          <li><strong>Complete Coverage:</strong> Visits all cells exactly once</li>
+          <li><strong>Minimal Backtracking:</strong> Snake pattern avoids revisiting areas</li>
+          <li><strong>Grid Size:</strong> 5×5 cells, 0.5m per cell = 2.5m × 2.5m coverage</li>
+          <li><strong>State Tracking:</strong> 0=unexplored, 1=exploring, 2=explored, 3=target found</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Dead Reckoning -->
+    <section class="section">
+      <h2 class="section-title">5. Dead Reckoning Position Estimation</h2>
+
+      <div class="algorithm-card">
+        <h3>5.1 Position Update Equations</h3>
+
+        <pre><code class="language-python">def update_position_dead_reckoning(self, vx: float, vy: float,
+                                    yaw_deg: float, dt: float):
+    """
+    Update estimated position using dead reckoning.
+
+    Integrates velocity commands with IMU yaw to estimate position
+    in world frame. Accumulates error over time (±10-30cm per 3m).
+
+    Args:
+        vx: Forward velocity (m/s) in body frame
+        vy: Right velocity (m/s) in body frame
+        yaw_deg: Current yaw angle (degrees) from IMU
+        dt: Time step (seconds)
+    """
+    # Convert yaw to radians
+    yaw_rad = np.deg2rad(yaw_deg)
+
+    # Rotation matrix: Body frame → World frame
+    # [x_world]   [cos(ψ)  -sin(ψ)] [vx]
+    # [y_world] = [sin(ψ)   cos(ψ)] [vy]
+
+    # Transform velocities to world frame
+    vx_world = vx * np.cos(yaw_rad) - vy * np.sin(yaw_rad)
+    vy_world = vx * np.sin(yaw_rad) + vy * np.cos(yaw_rad)
+
+    # Integrate position: x' = x + v × Δt
+    self.estimated_x += vx_world * dt
+    self.estimated_y += vy_world * dt
+
+    # Update yaw
+    self.estimated_yaw = yaw_deg
+
+    return (self.estimated_x, self.estimated_y, self.estimated_yaw)
+</code></pre>
+
+        <h4>Mathematical Formulation</h4>
+        <p>Position update in world frame:</p>
+        <p>
+          $$x' = x + (v_x \cos\psi - v_y \sin\psi) \cdot \Delta t$$
+          $$y' = y + (v_x \sin\psi + v_y \cos\psi) \cdot \Delta t$$
+        </p>
+        <p>Where:</p>
+        <ul>
+          <li>$\psi$ = yaw angle (radians)</li>
+          <li>$v_x, v_y$ = velocities in body frame</li>
+          <li>$\Delta t$ = time step</li>
+        </ul>
+
+        <h4>Key Points</h4>
+        <ul>
+          <li><strong>Frame Transformation:</strong> Converts body-frame velocities to world frame</li>
+          <li><strong>IMU Fusion:</strong> Uses yaw from IMU for rotation correction</li>
+          <li><strong>Error Accumulation:</strong> ±10-30cm drift per 3m traveled</li>
+          <li><strong>PID Correction:</strong> Final approach uses PID to correct accumulated error</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Configuration Example -->
+    <section class="section">
+      <h2 class="section-title">6. Configuration and Parameters</h2>
+
+      <div class="algorithm-card">
+        <h3>6.1 Tello Configuration Class</h3>
+        <p>
+          <strong>File:</strong> <code>Tello/obstacle_avoidance/config.py</code>
+        </p>
+
+        <pre><code class="language-python">class Config:
+    """Configuration parameters for Tello obstacle avoidance system."""
+
+    # YOLOv8 Model
+    YOLO_MODEL = "yolov8n.pt"  # Nano model for speed
+    DETECTION_CONFIDENCE = 0.5  # Minimum confidence threshold
+
+    # Camera Calibration
+    FOCAL_LENGTH_PX = 700  # Empirically calibrated
+    IMAGE_WIDTH = 960
+    IMAGE_HEIGHT = 720
+
+    # Known Object Heights (meters)
+    OBJECT_HEIGHTS = {
+        "person": 1.7,
+        "chair": 0.9,
+        "dining table": 0.75,
+        "couch": 0.85,
+        "bed": 0.6,
+        "generic": 1.0  # Default for unknown objects
+    }
+
+    # Threat Assessment Thresholds (meters)
+    THREAT_HIGH_DISTANCE = 1.5    # Immediate action required
+    THREAT_MEDIUM_DISTANCE = 2.5  # Cautious navigation
+
+    # Obstacle Avoidance Maneuvers (cm)
+    DODGE_LATERAL_CM = 80   # Side dodge distance
+    DODGE_VERTICAL_CM = 60  # Vertical dodge distance
+
+    # PID Controller Gains
+    PID_KP = 1.0   # Proportional gain
+    PID_KI = 0.1   # Integral gain
+    PID_KD = 0.3   # Derivative gain
+
+    # Flight Parameters
+    CRUISE_SPEED_CM_S = 50     # Normal flight speed
+    PRECISION_SPEED_CM_S = 20  # Slow speed for landing
+    FLIGHT_ALTITUDE_CM = 100   # Default cruise altitude
+</code></pre>
+
+        <h4>Key Parameters</h4>
+        <ul>
+          <li><strong>YOLOv8-nano:</strong> 3.2M parameters, 6MB model size, 10-15 FPS</li>
+          <li><strong>Focal Length:</strong> 700 pixels (calibrated via known-distance objects)</li>
+          <li><strong>Threat Thresholds:</strong> HIGH &lt;1.5m, MEDIUM 1.5-2.5m, LOW &gt;2.5m</li>
+          <li><strong>Balanced Maneuvers:</strong> Lateral 80cm, Vertical 60cm (net displacement = 0)</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Summary -->
+    <section class="section">
+      <h2 class="section-title">7. Code Organization Summary</h2>
+
+      <div class="algorithm-card">
+        <h3>Project Structure</h3>
+
+        <pre><code>EECSc106aFinal/
+├── Tello/                           # Tello Drone (Parent/Payload)
+│   ├── obstacle_avoidance/
+│   │   ├── obstacle_detector.py     # YOLOv8 detection + distance estimation
+│   │   ├── path_planner.py          # Bresenham + linear interpolation
+│   │   ├── circumvent.py            # Dodge maneuvers
+│   │   └── config.py                # Configuration parameters
+│   ├── pid_controller/
+│   │   └── position_controller.py   # PID implementation
+│   ├── visualization/
+│   │   ├── live_map.py              # Real-time trajectory display
+│   │   └── web_dashboard.py         # Web-based monitoring
+│   └── navigate.py                  # Main navigation loop
+│
+├── AR Drone/                        # AR Drone (Helper/Scout)
+│   ├── aruco_detection/
+│   │   ├── detector.py              # ArUco marker detection
+│   │   └── transform.py             # Pose estimation
+│   ├── path_planning/
+│   │   ├── grid_search.py           # Snake pattern grid search
+│   │   └── visualizer.py            # Path visualization
+│   ├── pid_controller/
+│   │   └── pid.py                   # PID for optical centering
+│   └── main.py                      # Main execution script
+│
+└── website/                         # Project documentation website
+    ├── index.html                   # Home page
+    ├── technical.html               # Technical details
+    ├── design-choices.html          # Design decisions
+    └── code-snippets.html           # This page
+</code></pre>
+
+        <h4>Module Responsibilities</h4>
+        <ul>
+          <li><strong>obstacle_detection/:</strong> YOLOv8 inference, distance estimation, threat assessment</li>
+          <li><strong>path_planning/:</strong> Waypoint generation (Bresenham, linear, grid search)</li>
+          <li><strong>pid_controller/:</strong> Precision position control and landing</li>
+          <li><strong>visualization/:</strong> Real-time trajectory plotting and web dashboard</li>
+          <li><strong>aruco_detection/:</strong> Marker detection and pose estimation</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Navigation Links -->
+    <section class="section">
+      <div class="highlight-box">
+        <h3>Explore More</h3>
+        <p>Continue exploring the project:</p>
+        <ul>
+          <li><a href="technical.html"><strong>Technical Details</strong></a> - Detailed algorithm documentation</li>
+          <li><a href="design-choices.html"><strong>Design Choices</strong></a> - Architectural decisions and trade-offs</li>
+          <li><a href="index.html"><strong>Home</strong></a> - Project overview and results</li>
+        </ul>
+      </div>
+    </section>
+  </div>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <p>&copy; 2025 Team 14 | UC Berkeley EECS/ME 106a</p>
+    <p>Agni Rajinikanth, Alan Bao, Nohl Abdelhadi, Imam Majed Alayeh</p>
+  </footer>
+
+  <!-- Back to Top Button -->
+  <a href="#" class="back-to-top" aria-label="Back to top">↑</a>
+
+  <!-- JavaScript -->
+  <script src="js/navigation.js"></script>
+</body>
+</html>

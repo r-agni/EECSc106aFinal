@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="UC Berkeley EECS/ME 106a Final Project: Drone Cooperative System for Humanitarian Missions. Team 14: Agni Rajinikanth, Alan Bao, Nohl Abdelhadi, Imam Majed Alayeh">
+  <meta name="keywords" content="drone, autonomous navigation, YOLOv8, ArUco, PID control, UC Berkeley, EECS 106a">
+  <meta name="author" content="Team 14: Agni Rajinikanth, Alan Bao, Nohl Abdelhadi, Imam Majed Alayeh">
+
+  <title>Drone Cooperative System for Humanitarian Missions | EECS 106a</title>
+
+  <!-- Stylesheets -->
+  <link rel="stylesheet" href="css/paper.css">
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/responsive.css">
+
+  <!-- MathJax for equation rendering -->
+  <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true
+      },
+      svg: {
+        fontCache: 'global'
+      }
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js" async></script>
+</head>
+<body>
+  <!-- Navigation Bar -->
+  <nav class="navbar">
+    <div class="navbar-container">
+      <a href="./" class="navbar-brand">Team 14 | EECS 106a</a>
+      <div class="nav-links">
+        <a href="index.html">Home</a>
+        <a href="technical.html">Technical Details</a>
+        <a href="design-choices.html">Design Choices</a>
+        <a href="code-snippets.html">Code Snippets</a>
+        <a href="team.html">Team</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <div class="container">
+    <!-- Title Block -->
+    <div class="title-block">
+      <h1 class="title">Drone Cooperative System for Humanitarian Missions</h1>
+      <div class="authors">
+        Agni Rajinikanth, Alan Bao, Nohl Abdelhadi, Imam Majed Alayeh
+      </div>
+      <div class="affiliation">
+        UC Berkeley | EECS/ME 106a: Introduction to Robotics | Fall 2025
+      </div>
+    </div>
+
+    <!-- Abstract -->
+    <section class="abstract">
+      <div class="abstract-title">Abstract</div>
+      <p>
+        We propose a cooperative two-drone system designed for humanitarian missions such as search-and-rescue and critical payload delivery.
+        The system consists of a <strong>Parent Drone</strong> (DJI Tello) that transports and delivers payloads at low altitude while avoiding
+        obstacles, and a <strong>Helper Drone</strong> (Parrot AR.Drone 2.0) that scouts ahead at high altitude to identify optimal paths.
+        The Helper Drone scouts using grid search patterns and ArUco marker detection, then communicates path information to the Parent Drone.
+        The Parent Drone flies lower while detecting and avoiding obstacles using YOLOv8 real-time object detection and a PID controller for
+        precise landing (±10cm accuracy). Using vision-based sensing, path planning algorithms, and semantic communication modules, both drones
+        coordinate to ensure safe travel and accurate payload drops. The project demonstrates multi-agent collaboration, environment-aware planning,
+        and autonomous mission safety for UAV-based humanitarian operations.
+      </p>
+    </section>
+
+    <!-- Demo Video -->
+    <section class="section">
+      <h2 class="section-title">System Demonstration</h2>
+      <div class="video-container">
+        <iframe
+          src="https://www.youtube.com/embed/ZG6kzSA0JAc"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowfullscreen>
+        </iframe>
+      </div>
+      <figcaption>Figure 1: Complete autonomous navigation demonstration showing cooperative two-drone system with obstacle avoidance and precision landing</figcaption>
+    </section>
+
+    <!-- Introduction -->
+    <section class="section">
+      <h2 class="section-title">1. Introduction</h2>
+
+      <h3 class="subsection-title">Problem Statement</h3>
+      <p>
+        Humanitarian missions in disaster zones, remote areas, and search-and-rescue operations require autonomous aerial systems that can
+        navigate complex environments, avoid obstacles, and deliver payloads with precision. Traditional single-drone systems face limitations
+        in balancing high-altitude reconnaissance with low-altitude obstacle avoidance and payload delivery.
+      </p>
+
+      <h3 class="subsection-title">Motivation</h3>
+      <p>
+        By employing a cooperative two-drone approach, we can leverage the complementary capabilities of different UAV platforms:
+      </p>
+      <ul>
+        <li><strong>High-altitude scouting</strong> for optimal path identification and target localization</li>
+        <li><strong>Low-altitude navigation</strong> with real-time obstacle detection and avoidance</li>
+        <li><strong>Precision landing</strong> for accurate payload delivery</li>
+        <li><strong>Multi-agent coordination</strong> for robust mission completion</li>
+      </ul>
+
+      <h3 class="subsection-title">Approach</h3>
+      <p>
+        Our system employs two drones with distinct roles: the <strong>AR Drone (Helper)</strong> performs grid-based search patterns at high
+        altitude using ArUco markers for localization, while the <strong>Tello Drone (Parent)</strong> navigates at low altitude with YOLOv8
+        object detection, pinhole camera distance estimation, and PID-controlled precision landing. The drones communicate transform data to
+        coordinate their missions.
+      </p>
+    </section>
+
+    <!-- System Overview -->
+    <section class="section">
+      <h2 class="section-title">2. System Overview</h2>
+
+      <div class="drone-comparison">
+        <!-- AR Drone (Helper) -->
+        <div class="drone-card">
+          <h3>AR Drone (Helper/Scout)</h3>
+          <img src="assets/images/ar-drone-image.png" alt="Parrot AR.Drone 2.0">
+          <p><strong>Role:</strong> High-altitude scout for path reconnaissance</p>
+          <p><strong>Key Technologies:</strong></p>
+          <ul>
+            <li>ArUco marker detection (OpenCV)</li>
+            <li>Grid search algorithm (snake pattern)</li>
+            <li>Transform computation (body → world frame)</li>
+            <li>Optical centering (proportional control)</li>
+            <li>IMU positional centering</li>
+          </ul>
+          <p><strong>Capabilities:</strong></p>
+          <ul>
+            <li>5×5 grid search (0.5m cells)</li>
+            <li>Dual camera system (bottom + front)</li>
+            <li>±10cm localization accuracy</li>
+            <li>Velocity-based dead reckoning</li>
+          </ul>
+        </div>
+
+        <!-- Tello Drone (Parent) -->
+        <div class="drone-card">
+          <h3>Tello Drone (Parent/Payload)</h3>
+          <img src="assets/images/tellodrone-iamge.png" alt="DJI Tello Drone">
+          <p><strong>Role:</strong> Low-altitude carrier with obstacle avoidance</p>
+          <p><strong>Key Technologies:</strong></p>
+          <ul>
+            <li>YOLOv8 object detection (real-time)</li>
+            <li>Pinhole camera distance estimation</li>
+            <li>Threat assessment (3-level system)</li>
+            <li>Obstacle circumvention (lateral/vertical)</li>
+            <li>PID controller (precision landing)</li>
+          </ul>
+          <p><strong>Capabilities:</strong></p>
+          <ul>
+            <li>10-15 FPS detection (89.7% mAP)</li>
+            <li>80+ object classes recognized</li>
+            <li>±10cm landing accuracy</li>
+            <li>Mathematically balanced dodges</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3 class="subsection-title">System Architecture</h3>
+      <figure style="margin: 2em 0;">
+        <img src="assets/images/system-architecture.svg" alt="System Architecture Diagram" style="max-width: 100%; border: 1px solid #e0e0e0; border-radius: 4px;">
+      </figure>
+
+      <h3 class="subsection-title">System Workflow</h3>
+      <ol>
+        <li><strong>AR Drone Takeoff:</strong> Launches and performs grid search at target altitude</li>
+        <li><strong>ArUco Detection:</strong> Identifies Marker 0 (origin) and Marker 1 (target)</li>
+        <li><strong>Transform Computation:</strong> Calculates world-frame position relative to markers</li>
+        <li><strong>Communication:</strong> Transmits target coordinates to Tello Drone</li>
+        <li><strong>Tello Navigation:</strong> Flies to target using hybrid path planning (Linear Interpolation + Bresenham)</li>
+        <li><strong>Reactive Obstacle Avoidance:</strong> YOLOv8 detection with dodge maneuvers and path replanning</li>
+        <li><strong>Precision Landing:</strong> PID controller achieves ±10cm accuracy at target</li>
+      </ol>
+    </section>
+
+    <!-- High-Level Results -->
+    <section class="section">
+      <h2 class="section-title">3. Results & Achievements</h2>
+
+      <h3 class="subsection-title">AR Drone (Helper) Performance</h3>
+      <div class="results-grid">
+        <div class="result-item">
+          <h4>ArUco Detection</h4>
+          <p><span class="badge success">✓ Success</span></p>
+          <p>Reliable marker detection and tracking with ±2cm accuracy at 1m distance</p>
+        </div>
+        <div class="result-item">
+          <h4>Grid Search</h4>
+          <p><span class="badge success">✓ Complete</span></p>
+          <p>5×5 cell coverage with snake/boustrophedon pattern</p>
+        </div>
+        <div class="result-item">
+          <h4>Transform Accuracy</h4>
+          <p><span class="badge success">✓ ±10cm</span></p>
+          <p>World-frame position estimation via velocity integration</p>
+        </div>
+        <div class="result-item">
+          <h4>Optical Centering</h4>
+          <p><span class="badge success">✓ Achieved</span></p>
+          <p>Proportional control for tag alignment</p>
+        </div>
+      </div>
+
+      <div class="image-gallery">
+        <div class="gallery-item">
+          <img src="assets/images/ar-drone-path-graph.png" alt="AR Drone Grid Search Pattern">
+          <div class="gallery-caption">Figure 2: Grid search trajectory and waypoint coverage</div>
+        </div>
+        <div class="gallery-item">
+          <img src="assets/images/AR-drone-logs-output.png" alt="AR Drone System Output">
+          <div class="gallery-caption">Figure 3: Transform computation logs showing position estimation</div>
+        </div>
+      </div>
+
+      <h3 class="subsection-title">Tello Drone (Parent) Performance</h3>
+      <div class="results-grid">
+        <div class="result-item">
+          <h4>YOLOv8 Detection</h4>
+          <p><span class="badge success">✓ 10-15 FPS</span></p>
+          <p>Real-time object detection with 89.7% mAP accuracy</p>
+        </div>
+        <div class="result-item">
+          <h4>Distance Estimation</h4>
+          <p><span class="badge success">✓ ±20% @ 5m</span></p>
+          <p>Monocular depth using pinhole camera model</p>
+        </div>
+        <div class="result-item">
+          <h4>Obstacle Avoidance</h4>
+          <p><span class="badge success">✓ Zero Drift</span></p>
+          <p>Balanced maneuvers preserve target endpoint</p>
+        </div>
+        <div class="result-item">
+          <h4>PID Landing</h4>
+          <p><span class="badge success">✓ ±10cm</span></p>
+          <p>Precision control in 2-3 iterations</p>
+        </div>
+      </div>
+
+      <div class="video-container">
+        <iframe
+          src="https://www.youtube.com/embed/NWBAYWgyoZQ"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowfullscreen>
+        </iframe>
+      </div>
+      <figcaption>Figure 4: AR Drone optical centering demonstration using ArUco markers</figcaption>
+
+      <div class="video-container">
+        <iframe
+          src="https://www.youtube.com/embed/0HOplPK0Apg"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowfullscreen>
+        </iframe>
+      </div>
+      <figcaption>Figure 5: Tello Drone self-centering and precision landing sequence</figcaption>
+
+      <h3 class="subsection-title">System Integration</h3>
+      <ul>
+        <li><span class="badge success">✓</span> Cooperative two-drone mission execution</li>
+        <li><span class="badge success">✓</span> Transform data communication between drones</li>
+        <li><span class="badge success">✓</span> Live visualization dashboard</li>
+        <li><span class="badge success">✓</span> Autonomous mission completion with safety procedures</li>
+      </ul>
+    </section>
+
+    <!-- Challenges & Solutions -->
+    <section class="section">
+      <h2 class="section-title">4. Challenges & Solutions</h2>
+
+      <div class="challenges-list">
+        <div class="challenge-item">
+          <h4>Challenge 1: Dual Camera Limitation</h4>
+          <p class="challenge-problem">
+            <strong>Problem:</strong> AR Drone cannot stream both cameras (bottom + front) simultaneously, limiting simultaneous
+            ArUco detection and obstacle avoidance.
+          </p>
+          <p class="challenge-solution">
+            <strong>Solution:</strong> Implemented intermittent camera switching every 2 seconds, alternating between bottom camera
+            for ArUco detection and front camera for obstacle monitoring. Frame buffering maintains visual continuity.
+          </p>
+        </div>
+
+        <div class="challenge-item">
+          <h4>Challenge 2: Dead Reckoning Drift</h4>
+          <p class="challenge-problem">
+            <strong>Problem:</strong> Position estimation errors accumulate during flight (±30cm per 3m traveled), affecting
+            landing accuracy.
+          </p>
+          <p class="challenge-solution">
+            <strong>Solution:</strong> Implemented PID controller for final approach correction, reducing error from ±30cm to
+            ±10cm through iterative position feedback (typically 2-3 correction cycles).
+          </p>
+        </div>
+
+        <div class="challenge-item">
+          <h4>Challenge 3: Real-time Detection Performance</h4>
+          <p class="challenge-problem">
+            <strong>Problem:</strong> YOLOv8 must achieve 10-15 FPS on Tello's limited computational resources for safe
+            reactive avoidance.
+          </p>
+          <p class="challenge-solution">
+            <strong>Solution:</strong> Selected YOLOv8-nano model (3.2M parameters, 6MB) and implemented frame skipping
+            (process every 2nd frame) to maintain real-time performance while preserving 89.7% mAP accuracy.
+          </p>
+        </div>
+
+        <div class="challenge-item">
+          <h4>Challenge 4: Computer Vision Latency</h4>
+          <p class="challenge-problem">
+            <strong>Problem:</strong> Object detection and distance estimation introduce processing delays that affect
+            reactive navigation.
+          </p>
+          <p class="challenge-solution">
+            <strong>Solution:</strong> Implemented asynchronous pipeline with frame buffering and predictive threat assessment,
+            allowing drone to begin maneuvers while processing completes.
+          </p>
+        </div>
+
+        <div class="challenge-item">
+          <h4>Challenge 5: Wind & Drift Compensation</h4>
+          <p class="challenge-problem">
+            <strong>Problem:</strong> External disturbances (wind, blade wash) cause unmodeled position drift during flight.
+          </p>
+          <p class="challenge-solution">
+            <strong>Solution:</strong> Combined IMU-based velocity integration with PID integral term to correct for constant
+            disturbances and maintain position accuracy.
+          </p>
+        </div>
+
+        <div class="challenge-item">
+          <h4>Challenge 6: Camera Calibration</h4>
+          <p class="challenge-problem">
+            <strong>Problem:</strong> Distance estimation via pinhole camera model requires accurate focal length calibration
+            for each drone platform.
+          </p>
+          <p class="challenge-solution">
+            <strong>Solution:</strong> Performed empirical calibration by measuring known objects at fixed distances, achieving
+            focal length estimate of 700 pixels with ±20% error at 5m.
+          </p>
+        </div>
+
+        <div class="challenge-item">
+          <h4>Challenge 7: Cross-Platform Development</h4>
+          <p class="challenge-problem">
+            <strong>Problem:</strong> Codebase must support both Mac and Windows development environments with different
+            drone SDK implementations.
+          </p>
+          <p class="challenge-solution">
+            <strong>Solution:</strong> Used platform-agnostic libraries (pyardrone for AR Drone, djitellopy for Tello) and
+            abstracted platform-specific code into wrapper classes.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Conclusion -->
+    <section class="section">
+      <h2 class="section-title">5. Conclusion</h2>
+
+      <h3 class="subsection-title">Summary of Achievements</h3>
+      <p>
+        This project successfully demonstrates a cooperative two-drone system for autonomous humanitarian missions. The AR Drone
+        (Helper) performs high-altitude reconnaissance using ArUco markers and grid search patterns, while the Tello Drone (Parent)
+        executes low-altitude navigation with real-time YOLOv8 obstacle detection and PID-controlled precision landing. Key achievements
+        include:
+      </p>
+      <ul>
+        <li>±10cm landing accuracy through PID control and dead reckoning</li>
+        <li>Real-time object detection at 10-15 FPS with 89.7% mAP</li>
+        <li>Mathematically balanced obstacle avoidance preserving target endpoints</li>
+        <li>Successful multi-drone coordination and transform communication</li>
+        <li>Robust performance across 7 major technical challenges</li>
+      </ul>
+
+      <h3 class="subsection-title">Future Work</h3>
+      <p>
+        Potential improvements and extensions to this system include:
+      </p>
+      <ul>
+        <li><strong>Synchronous Communication:</strong> Real-time data streaming between drones for dynamic replanning</li>
+        <li><strong>Generalized Obstacle Detection:</strong> Extend detection to AR Drone for full dual-camera obstacle avoidance</li>
+        <li><strong>Optimized Path Planning:</strong> Implement A* or RRT for complex environments with static obstacles</li>
+        <li><strong>Physical Payload Delivery:</strong> Design and test mechanical release mechanisms for actual payload drops</li>
+        <li><strong>Vision Language Models:</strong> Integrate multimodal LLMs for semantic scene understanding and natural language mission planning</li>
+        <li><strong>SLAM Integration:</strong> Simultaneous localization and mapping for GPS-denied environments</li>
+      </ul>
+
+      <h3 class="subsection-title">Team Photo</h3>
+      <div class="team-photo">
+        <img src="assets/images/group-picture.png" alt="Team 14 Group Photo">
+        <figcaption>Figure 6: Team 14 (left to right): Agni Rajinikanth, Alan Bao, Nohl Abdelhadi, Imam Majed Alayeh</figcaption>
+      </div>
+
+      <h3 class="subsection-title">Acknowledgments</h3>
+      <p>
+        We would like to thank the UC Berkeley EECS/ME 106a course staff for their guidance and support throughout this project.
+        Special thanks to our instructors and TAs for providing the necessary resources and feedback.
+      </p>
+    </section>
+
+    <!-- Technical Details Link -->
+    <section class="section">
+      <div class="highlight-box">
+        <h3>Interested in Technical Details?</h3>
+        <p>
+          For comprehensive algorithm documentation, mathematical formulations, implementation details, and code examples,
+          visit the <a href="technical.html"><strong>Technical Details</strong></a> page.
+        </p>
+        <p>
+          Topics covered include: YOLOv8 detection pipeline, pinhole camera distance estimation, PID control theory, dead reckoning,
+          Bresenham's algorithm, ArUco pose estimation, grid search patterns, and more.
+        </p>
+      </div>
+    </section>
+  </div>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <p>&copy; 2025 Team 14 | UC Berkeley EECS/ME 106a</p>
+    <p>Agni Rajinikanth, Alan Bao, Nohl Abdelhadi, Imam Majed Alayeh</p>
+  </footer>
+
+  <!-- Back to Top Button -->
+  <a href="#" class="back-to-top" aria-label="Back to top">↑</a>
+
+  <!-- JavaScript -->
+  <script src="js/navigation.js"></script>
+</body>
+</html>

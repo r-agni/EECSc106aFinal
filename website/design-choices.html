@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Design Choices and Architectural Decisions for Drone Cooperative System">
+  <meta name="keywords" content="design decisions, architecture, drone systems, robotics">
+  <meta name="author" content="Team 14: Agni Rajinikanth, Alan Bao, Nohl Abdelhadi, Imam Majed Alayeh">
+
+  <title>Design Choices | Drone Cooperative System</title>
+
+  <!-- Stylesheets -->
+  <link rel="stylesheet" href="css/paper.css">
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/responsive.css">
+
+  <!-- MathJax for equation rendering -->
+  <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true
+      },
+      svg: {
+        fontCache: 'global'
+      }
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js" async></script>
+</head>
+<body>
+  <!-- Navigation Bar -->
+  <nav class="navbar">
+    <div class="navbar-container">
+      <a href="./" class="navbar-brand">Team 14 | EECS 106a</a>
+      <div class="nav-links">
+        <a href="index.html">Home</a>
+        <a href="technical.html">Technical Details</a>
+        <a href="design-choices.html">Design Choices</a>
+        <a href="code-snippets.html">Code Snippets</a>
+        <a href="team.html">Team</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <div class="container">
+    <!-- Title Block -->
+    <div class="title-block">
+      <h1 class="title">Design Choices & Architectural Decisions</h1>
+      <div class="authors">
+        Team 14: Agni Rajinikanth, Alan Bao, Nohl Abdelhadi, Imam Majed Alayeh
+      </div>
+      <div class="affiliation">
+        UC Berkeley | EECS/ME 106a: Introduction to Robotics | Fall 2025
+      </div>
+    </div>
+
+    <!-- Introduction -->
+    <section class="section">
+      <h2 class="section-title">Overview</h2>
+      <p>
+        This document outlines the key architectural decisions, design trade-offs, and rationale behind the implementation
+        of our cooperative two-drone system. Each choice was carefully considered to balance performance, reliability,
+        feasibility, and project constraints.
+      </p>
+    </section>
+
+    <!-- System Architecture -->
+    <section class="section">
+      <h2 class="section-title">1. System Architecture Decisions</h2>
+
+      <div class="algorithm-card">
+        <h3>1.1 Two-Drone Cooperative Architecture</h3>
+
+        <h4>Decision</h4>
+        <p>
+          Implement a cooperative system with two drones having distinct, specialized roles rather than a single
+          multi-purpose drone or multiple identical drones.
+        </p>
+
+        <h4>Rationale</h4>
+        <ul>
+          <li><strong>Complementary Capabilities:</strong> AR Drone excels at stable hovering and ArUco detection, while
+              Tello Drone has better computational resources for YOLOv8</li>
+          <li><strong>Altitude Separation:</strong> High-altitude scouting provides global view while low-altitude navigation
+              handles detailed obstacle avoidance</li>
+          <li><strong>Risk Mitigation:</strong> Helper drone scouts ahead, reducing collision risk for payload-carrying parent drone</li>
+          <li><strong>Resource Constraints:</strong> Hardware limitations prevented both capabilities on a single platform</li>
+        </ul>
+
+        <h4>Trade-offs</h4>
+        <ul>
+          <li><strong>Pros:</strong> Specialized hardware optimization, parallel operations, fault tolerance</li>
+          <li><strong>Cons:</strong> Inter-drone communication complexity, synchronization challenges, higher total cost</li>
+        </ul>
+
+        <h4>Alternatives Considered</h4>
+        <ul>
+          <li><strong>Single Drone:</strong> Rejected due to insufficient computational resources and camera limitations</li>
+          <li><strong>Swarm Architecture:</strong> Rejected due to coordination complexity beyond project scope</li>
+        </ul>
+      </div>
+
+      <div class="algorithm-card">
+        <h3>1.2 Layered Architecture Pattern</h3>
+
+        <h4>Decision</h4>
+        <p>
+          Organize system into five distinct layers: Hardware → Perception → Planning → Control → Communication
+        </p>
+
+        <h4>Rationale</h4>
+        <ul>
+          <li><strong>Separation of Concerns:</strong> Each layer has clear responsibilities and interfaces</li>
+          <li><strong>Modularity:</strong> Components can be developed, tested, and debugged independently</li>
+          <li><strong>Maintainability:</strong> Changes in one layer minimally impact others</li>
+          <li><strong>Academic Best Practices:</strong> Follows standard robotics architecture patterns (perception-planning-action)</li>
+        </ul>
+
+        <h4>Trade-offs</h4>
+        <ul>
+          <li><strong>Pros:</strong> Clean code organization, easier debugging, team parallel development</li>
+          <li><strong>Cons:</strong> Layer boundaries introduce latency, potential over-engineering for small project</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Perception Layer -->
+    <section class="section">
+      <h2 class="section-title">2. Perception Layer Decisions</h2>
+
+      <div class="algorithm-card">
+        <h3>2.1 YOLOv8-nano for Object Detection</h3>
+
+        <h4>Decision</h4>
+        <p>
+          Use YOLOv8-nano model (3.2M parameters) for real-time obstacle detection on Tello Drone.
+        </p>
+
+        <h4>Rationale</h4>
+        <ul>
+          <li><strong>Performance:</strong> Achieves 10-15 FPS on Tello's limited hardware (vs. 2-3 FPS for larger models)</li>
+          <li><strong>Accuracy:</strong> 89.7% mAP on COCO dataset sufficient for obstacle classes (person, chair, table, etc.)</li>
+          <li><strong>Size:</strong> 6MB model fits in memory constraints</li>
+          <li><strong>Latency:</strong> ~70ms inference time enables reactive avoidance</li>
+        </ul>
+
+        <h4>Trade-offs</h4>
+        <ul>
+          <li><strong>Pros:</strong> Real-time performance, low memory footprint, adequate accuracy</li>
+          <li><strong>Cons:</strong> Lower accuracy than YOLOv8-large (89.7% vs. 95.2% mAP), fewer fine-grained detections</li>
+        </ul>
+
+        <h4>Alternatives Considered</h4>
+        <ul>
+          <li><strong>YOLOv8-small/medium:</strong> Rejected due to frame rate dropping below 10 FPS (unsafe for reactive avoidance)</li>
+          <li><strong>MobileNet-SSD:</strong> Rejected due to lower accuracy (78% mAP) despite faster inference</li>
+          <li><strong>Classical CV (HOG+SVM):</strong> Rejected due to poor generalization to diverse obstacle types</li>
+        </ul>
+      </div>
+
+      <div class="algorithm-card">
+        <h3>2.2 ArUco Markers vs. Alternative Localization</h3>
+
+        <h4>Decision</h4>
+        <p>
+          Use ArUco marker detection (OpenCV DICT_4X4_50) for AR Drone localization instead of GPS or SLAM.
+        </p>
+
+        <h4>Rationale</h4>
+        <ul>
+          <li><strong>Precision:</strong> ±2cm accuracy at 1m distance (vs. ±5m for GPS)</li>
+          <li><strong>Indoor Use:</strong> Works in GPS-denied environments (lab, disaster zones)</li>
+          <li><strong>Computational Efficiency:</strong> Low processing overhead compared to SLAM</li>
+          <li><strong>Setup Simplicity:</strong> Markers easy to deploy in target zone</li>
+          <li><strong>Proven Reliability:</strong> Well-tested OpenCV implementation</li>
+        </ul>
+
+        <h4>Trade-offs</h4>
+        <ul>
+          <li><strong>Pros:</strong> High accuracy, low latency, works indoors, minimal compute</li>
+          <li><strong>Cons:</strong> Requires pre-placed markers, limited to marked areas, line-of-sight dependency</li>
+        </ul>
+
+        <h4>Alternatives Considered</h4>
+        <ul>
+          <li><strong>GPS:</strong> Rejected due to poor indoor performance and insufficient precision (±5m)</li>
+          <li><strong>Visual SLAM (ORB-SLAM):</strong> Rejected due to high computational cost and drift accumulation</li>
+          <li><strong>AprilTag:</strong> Rejected in favor of ArUco due to better OpenCV integration</li>
+        </ul>
+      </div>
+
+      <div class="algorithm-card">
+        <h3>2.3 Pinhole Camera Distance Estimation</h3>
+
+        <h4>Decision</h4>
+        <p>
+          Use monocular pinhole camera model $d = \frac{H \times f}{h}$ for distance estimation rather than stereo vision or depth sensors.
+        </p>
+
+        <h4>Rationale</h4>
+        <ul>
+          <li><strong>Hardware Constraints:</strong> Tello has single camera (no stereo pair or depth sensor)</li>
+          <li><strong>Sufficient Accuracy:</strong> ±20% error at 5m acceptable for threat assessment</li>
+          <li><strong>Simplicity:</strong> Single calibration parameter (focal length) vs. complex stereo calibration</li>
+          <li><strong>Real-time Performance:</strong> Trivial computation cost</li>
+        </ul>
+
+        <h4>Trade-offs</h4>
+        <ul>
+          <li><strong>Pros:</strong> Works with existing hardware, fast, simple implementation</li>
+          <li><strong>Cons:</strong> Requires known object heights, ±20% error, struggles with unknown objects</li>
+        </ul>
+
+        <h4>Alternatives Considered</h4>
+        <ul>
+          <li><strong>Stereo Vision:</strong> Rejected due to lack of dual cameras on Tello</li>
+          <li><strong>LiDAR:</strong> Rejected due to payload weight and cost constraints</li>
+          <li><strong>DepthAnythingV2 (Monocular Depth ML):</strong> Rejected due to computational overhead (1-2 FPS)</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Planning Layer -->
+    <section class="section">
+      <h2 class="section-title">3. Planning Layer Decisions</h2>
+
+      <div class="algorithm-card">
+        <h3>3.1 Hybrid Path Planning: Linear Interpolation + Bresenham</h3>
+
+        <h4>Decision</h4>
+        <p>
+          Combine linear interpolation for initial path generation with Bresenham's algorithm for discrete waypoint
+          computation, plus reactive replanning on obstacle detection.
+        </p>
+
+        <h4>Rationale</h4>
+        <ul>
+          <li><strong>Efficiency:</strong> Linear interpolation is O(1) for direct paths</li>
+          <li><strong>Precision:</strong> Bresenham provides discrete grid waypoints for movement commands</li>
+          <li><strong>Reactivity:</strong> Replanning triggered by YOLOv8 detections enables dynamic avoidance</li>
+          <li><strong>Simplicity:</strong> No complex map-building or A* search needed for open environments</li>
+        </ul>
+
+        <h4>Trade-offs</h4>
+        <ul>
+          <li><strong>Pros:</strong> Fast computation, works for open spaces, reactive to obstacles</li>
+          <li><strong>Cons:</strong> Suboptimal in cluttered environments, no global path optimization</li>
+        </ul>
+
+        <h4>Alternatives Considered</h4>
+        <ul>
+          <li><strong>A* Search:</strong> Rejected due to requiring pre-built map (unavailable in dynamic environments)</li>
+          <li><strong>RRT/RRT*:</strong> Rejected due to computational overhead and overkill for simple scenarios</li>
+          <li><strong>Pure Reactive (no planning):</strong> Rejected due to risk of local minima and inefficient paths</li>
+        </ul>
+      </div>
+
+      <div class="algorithm-card">
+        <h3>3.2 Grid Search Pattern for AR Drone</h3>
+
+        <h4>Decision</h4>
+        <p>
+          Use snake/boustrophedon pattern on 5×5 grid (0.5m cells) for systematic area coverage.
+        </p>
+
+        <h4>Rationale</h4>
+        <ul>
+          <li><strong>Coverage Guarantee:</strong> Ensures all cells visited exactly once</li>
+          <li><strong>Predictability:</strong> Deterministic pattern aids debugging</li>
+          <li><strong>Efficiency:</strong> Minimizes backtracking compared to random walk</li>
+          <li><strong>State Tracking:</strong> Simple state machine (unexplored → exploring → explored → target found)</li>
+        </ul>
+
+        <h4>Trade-offs</h4>
+        <ul>
+          <li><strong>Pros:</strong> Complete coverage, simple implementation, predictable</li>
+          <li><strong>Cons:</strong> Not optimal if target location has prior probability distribution</li>
+        </ul>
+
+        <h4>Alternatives Considered</h4>
+        <ul>
+          <li><strong>Spiral Pattern:</strong> Rejected due to complexity in rectangular grids</li>
+          <li><strong>Random Walk:</strong> Rejected due to non-guaranteed coverage</li>
+          <li><strong>Probabilistic Search:</strong> Rejected due to lack of prior target information</li>
+        </ul>
+      </div>
+
+      <div class="algorithm-card">
+        <h3>3.3 Three-Level Threat Assessment</h3>
+
+        <h4>Decision</h4>
+        <p>
+          Classify obstacles as HIGH (&lt;1.5m, center), MEDIUM (1.5-2.5m), LOW (&gt;2.5m or peripheral) based on
+          distance and position.
+        </p>
+
+        <h4>Rationale</h4>
+        <ul>
+          <li><strong>Safety Margin:</strong> 1.5m threshold provides reaction time at typical drone speed (0.5 m/s)</li>
+          <li><strong>Position Awareness:</strong> Center obstacles more dangerous than peripheral ones</li>
+          <li><strong>Decision Simplicity:</strong> Three levels balance granularity with implementation complexity</li>
+          <li><strong>Empirical Validation:</strong> Thresholds tuned through flight testing</li>
+        </ul>
+
+        <h4>Trade-offs</h4>
+        <ul>
+          <li><strong>Pros:</strong> Clear decision boundaries, accounts for position, safe margins</li>
+          <li><strong>Cons:</strong> Discrete levels may cause abrupt behavior changes at boundaries</li>
+        </ul>
+
+        <h4>Alternatives Considered</h4>
+        <ul>
+          <li><strong>Binary (avoid/ignore):</strong> Rejected due to insufficient granularity</li>
+          <li><strong>Continuous threat function:</strong> Rejected due to added complexity for marginal benefit</li>
+          <li><strong>Five-level system:</strong> Rejected due to over-engineering</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Control Layer -->
+    <section class="section">
+      <h2 class="section-title">4. Control Layer Decisions</h2>
+
+      <div class="algorithm-card">
+        <h3>4.1 PID Controller for Precision Landing</h3>
+
+        <h4>Decision</h4>
+        <p>
+          Implement discrete-time PID controller with anti-windup (Kp=1.0, Ki=0.1, Kd=0.3) for final landing correction.
+        </p>
+
+        <h4>Rationale</h4>
+        <ul>
+          <li><strong>Proven Method:</strong> PID is industry standard for UAV position control</li>
+          <li><strong>Handles Drift:</strong> Integral term corrects accumulated dead reckoning errors</li>
+          <li><strong>Fast Convergence:</strong> Achieves ±10cm accuracy in 2-3 iterations</li>
+          <li><strong>Tunable:</strong> Gains adjusted empirically during flight tests</li>
+        </ul>
+
+        <h4>Trade-offs</h4>
+        <ul>
+          <li><strong>Pros:</strong> Well-understood, robust to disturbances, fast convergence</li>
+          <li><strong>Cons:</strong> Requires manual tuning, potential overshoot if poorly tuned</li>
+        </ul>
+
+        <h4>Alternatives Considered</h4>
+        <ul>
+          <li><strong>Pure Proportional Control:</strong> Rejected due to steady-state error</li>
+          <li><strong>Model Predictive Control (MPC):</strong> Rejected due to computational overhead and complexity</li>
+          <li><strong>LQR:</strong> Rejected due to difficulty modeling drone dynamics accurately</li>
+        </ul>
+      </div>
+
+      <div class="algorithm-card">
+        <h3>4.2 Balanced Obstacle Dodge Maneuvers</h3>
+
+        <h4>Decision</h4>
+        <p>
+          Design lateral (80cm side → forward → 80cm back) and vertical (60cm up → forward → 60cm down) maneuvers
+          with net displacement = 0cm.
+        </p>
+
+        <h4>Rationale</h4>
+        <ul>
+          <li><strong>Target Preservation:</strong> Balanced maneuvers ensure drone returns to original trajectory</li>
+          <li><strong>Error Minimization:</strong> Eliminates cumulative drift from repeated dodges</li>
+          <li><strong>Simplicity:</strong> Fixed maneuver distances avoid complex path recalculation</li>
+          <li><strong>Predictability:</strong> Deterministic behavior aids debugging and safety</li>
+        </ul>
+
+        <h4>Trade-offs</h4>
+        <ul>
+          <li><strong>Pros:</strong> Mathematically guaranteed endpoint, simple implementation, no drift</li>
+          <li><strong>Cons:</strong> Fixed distances may be suboptimal for some obstacles, increased flight time</li>
+        </ul>
+
+        <h4>Alternatives Considered</h4>
+        <ul>
+          <li><strong>Adaptive Dodge Distance:</strong> Rejected due to difficulty ensuring balanced return</li>
+          <li><strong>Continuous Trajectory Adjustment:</strong> Rejected due to complexity</li>
+          <li><strong>Replanning After Each Dodge:</strong> Considered but used as complement (reactive replanning)</li>
+        </ul>
+      </div>
+
+      <div class="algorithm-card">
+        <h3>4.3 Dead Reckoning Position Estimation</h3>
+
+        <h4>Decision</h4>
+        <p>
+          Estimate position by integrating velocity commands with IMU yaw: $x' = x + v \cdot \cos(\psi) \cdot \Delta t$
+        </p>
+
+        <h4>Rationale</h4>
+        <ul>
+          <li><strong>No External Sensors:</strong> Works without GPS or external localization</li>
+          <li><strong>Minimal Latency:</strong> Instant updates from onboard IMU</li>
+          <li><strong>Acceptable Error:</strong> ±10-30cm per 3m sufficient when combined with PID correction</li>
+          <li><strong>Simple Implementation:</strong> Basic numerical integration</li>
+        </ul>
+
+        <h4>Trade-offs</h4>
+        <ul>
+          <li><strong>Pros:</strong> No external dependencies, fast, simple</li>
+          <li><strong>Cons:</strong> Drift accumulation, sensitive to wind, requires PID correction</li>
+        </ul>
+
+        <h4>Alternatives Considered</h4>
+        <ul>
+          <li><strong>Visual Odometry:</strong> Rejected due to computational cost and feature-poor environments</li>
+          <li><strong>Sensor Fusion (Kalman Filter):</strong> Rejected due to lack of additional sensors to fuse</li>
+          <li><strong>Pure IMU Integration:</strong> Rejected due to severe drift (tested: ±1m per 3m)</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Communication -->
+    <section class="section">
+      <h2 class="section-title">5. Communication & Integration</h2>
+
+      <div class="algorithm-card">
+        <h3>5.1 Transform Data Communication Protocol</h3>
+
+        <h4>Decision</h4>
+        <p>
+          AR Drone transmits target coordinates (x, y) to Tello Drone after ArUco marker localization completes.
+        </p>
+
+        <h4>Rationale</h4>
+        <ul>
+          <li><strong>Simplicity:</strong> One-way communication sufficient for scout → parent handoff</li>
+          <li><strong>Decoupling:</strong> Drones operate independently until handoff point</li>
+          <li><strong>Reliability:</strong> Single message reduces communication failure points</li>
+        </ul>
+
+        <h4>Trade-offs</h4>
+        <ul>
+          <li><strong>Pros:</strong> Simple protocol, minimal network overhead, clear handoff point</li>
+          <li><strong>Cons:</strong> No real-time updates if target moves, no feedback loop</li>
+        </ul>
+
+        <h4>Alternatives Considered</h4>
+        <ul>
+          <li><strong>Continuous Streaming:</strong> Rejected due to network overhead and unnecessary for static targets</li>
+          <li><strong>Bidirectional Communication:</strong> Rejected as Tello has no useful data to send back to AR Drone</li>
+        </ul>
+      </div>
+
+      <div class="algorithm-card">
+        <h3>5.2 Dual Camera Intermittent Switching (AR Drone)</h3>
+
+        <h4>Decision</h4>
+        <p>
+          Switch between bottom camera (ArUco) and front camera (obstacles) every 2 seconds rather than using both simultaneously.
+        </p>
+
+        <h4>Rationale</h4>
+        <ul>
+          <li><strong>Hardware Limitation:</strong> AR Drone SDK only supports single camera stream</li>
+          <li><strong>Priority:</strong> ArUco detection more critical (bottom camera gets more time)</li>
+          <li><strong>Safety:</strong> 2-second interval provides sufficient obstacle monitoring</li>
+        </ul>
+
+        <h4>Trade-offs</h4>
+        <ul>
+          <li><strong>Pros:</strong> Works within hardware constraints, balances both needs</li>
+          <li><strong>Cons:</strong> Blind spots during camera switches, potential missed obstacles</li>
+        </ul>
+
+        <h4>Alternatives Considered</h4>
+        <ul>
+          <li><strong>Bottom Camera Only:</strong> Rejected due to inability to detect forward obstacles</li>
+          <li><strong>Front Camera Only:</strong> Rejected as ArUco localization requires bottom camera</li>
+          <li><strong>Hardware Modification (Dual Streams):</strong> Rejected due to SDK limitations</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Software Engineering -->
+    <section class="section">
+      <h2 class="section-title">6. Software Engineering Decisions</h2>
+
+      <div class="algorithm-card">
+        <h3>6.1 Python Implementation</h3>
+
+        <h4>Decision</h4>
+        <p>
+          Implement entire system in Python using pyardrone, djitellopy, OpenCV, and Ultralytics libraries.
+        </p>
+
+        <h4>Rationale</h4>
+        <ul>
+          <li><strong>Library Ecosystem:</strong> Mature libraries for CV (OpenCV), ML (Ultralytics), and drone control</li>
+          <li><strong>Development Speed:</strong> Rapid prototyping for course project timeline</li>
+          <li><strong>Team Familiarity:</strong> All team members proficient in Python</li>
+          <li><strong>Cross-Platform:</strong> Works on both Mac and Windows development machines</li>
+        </ul>
+
+        <h4>Trade-offs</h4>
+        <ul>
+          <li><strong>Pros:</strong> Fast development, excellent libraries, readable code</li>
+          <li><strong>Cons:</strong> Slower than C++ (but sufficient for 10-15 FPS requirement)</li>
+        </ul>
+
+        <h4>Alternatives Considered</h4>
+        <ul>
+          <li><strong>C++:</strong> Rejected due to longer development time and complexity</li>
+          <li><strong>ROS (Robot Operating System):</strong> Rejected as overkill for two-drone system</li>
+        </ul>
+      </div>
+
+      <div class="algorithm-card">
+        <h3>6.2 Modular Code Organization</h3>
+
+        <h4>Decision</h4>
+        <p>
+          Organize code into separate directories: <code>Tello/</code>, <code>AR Drone/</code>, with subdirectories
+          for perception, planning, control, and utilities.
+        </p>
+
+        <h4>Rationale</h4>
+        <ul>
+          <li><strong>Parallel Development:</strong> Team members work on different modules simultaneously</li>
+          <li><strong>Reusability:</strong> Shared utilities (e.g., coordinate transforms) used by both drones</li>
+          <li><strong>Testability:</strong> Each module tested independently</li>
+          <li><strong>Maintainability:</strong> Clear file organization aids debugging</li>
+        </ul>
+
+        <h4>Trade-offs</h4>
+        <ul>
+          <li><strong>Pros:</strong> Clean structure, parallel work, easy testing</li>
+          <li><strong>Cons:</strong> Some code duplication between drones</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Conclusion -->
+    <section class="section">
+      <h2 class="section-title">7. Summary of Key Design Principles</h2>
+
+      <p>Throughout this project, several overarching principles guided our design decisions:</p>
+
+      <ol>
+        <li><strong>Safety First:</strong> All decisions prioritized safe operation (e.g., conservative threat thresholds, balanced maneuvers)</li>
+        <li><strong>Work Within Constraints:</strong> Embraced hardware limitations rather than fighting them (e.g., monocular depth, camera switching)</li>
+        <li><strong>Simplicity Over Perfection:</strong> Chose simple, reliable solutions over complex optimal ones (e.g., linear interpolation vs. A*)</li>
+        <li><strong>Empirical Validation:</strong> All parameters tuned through real-world flight testing</li>
+        <li><strong>Modularity:</strong> Layered architecture enabled parallel development and independent testing</li>
+        <li><strong>Performance Sufficiency:</strong> Optimized for "good enough" (10-15 FPS, ±10cm accuracy) rather than theoretical maximum</li>
+      </ol>
+
+      <p>
+        These design choices collectively enabled successful autonomous mission completion within the constraints
+        of a semester-long course project, demonstrating that thoughtful engineering trade-offs are as important
+        as algorithmic sophistication.
+      </p>
+    </section>
+
+    <!-- Navigation Links -->
+    <section class="section">
+      <div class="highlight-box">
+        <h3>Explore More</h3>
+        <p>Continue exploring the project:</p>
+        <ul>
+          <li><a href="technical.html"><strong>Technical Details</strong></a> - Detailed algorithm documentation</li>
+          <li><a href="code-snippets.html"><strong>Code Snippets</strong></a> - Key implementation examples</li>
+          <li><a href="team.html"><strong>Team</strong></a> - Meet the team members</li>
+          <li><a href="index.html"><strong>Home</strong></a> - Project overview and results</li>
+        </ul>
+      </div>
+    </section>
+  </div>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <p>&copy; 2025 Team 14 | UC Berkeley EECS/ME 106a</p>
+    <p>Agni Rajinikanth, Alan Bao, Nohl Abdelhadi, Imam Majed Alayeh</p>
+  </footer>
+
+  <!-- Back to Top Button -->
+  <a href="#" class="back-to-top" aria-label="Back to top">↑</a>
+
+  <!-- JavaScript -->
+  <script src="js/navigation.js"></script>
+</body>
+</html>

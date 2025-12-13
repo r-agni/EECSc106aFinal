@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="800" height="900" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#003262"/>
+    </marker>
+    <marker id="arrowhead-gold" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#FDB515"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="400" y="30" font-family="Arial, sans-serif" font-size="20" font-weight="bold" text-anchor="middle" fill="#003262">
+    Drone Cooperative System Architecture
+  </text>
+
+  <!-- Legend -->
+  <rect x="600" y="50" width="180" height="80" fill="#f9f9f9" stroke="#003262" stroke-width="2" rx="5"/>
+  <text x="690" y="70" font-family="Arial" font-size="12" font-weight="bold" text-anchor="middle" fill="#003262">Legend</text>
+  <rect x="610" y="80" width="20" height="15" fill="#FFE6E6" stroke="#003262"/>
+  <text x="640" y="92" font-family="Arial" font-size="11" fill="#000">AR Drone</text>
+  <rect x="610" y="100" width="20" height="15" fill="#E6F3FF" stroke="#003262"/>
+  <text x="640" y="112" font-family="Arial" font-size="11" fill="#000">Tello Drone</text>
+
+  <!-- Layer 1: Hardware -->
+  <rect x="50" y="150" width="700" height="100" fill="#f0f0f0" stroke="#003262" stroke-width="2" rx="5"/>
+  <text x="400" y="175" font-family="Arial" font-size="16" font-weight="bold" text-anchor="middle" fill="#003262">
+    Hardware Layer
+  </text>
+
+  <!-- AR Drone Hardware -->
+  <rect x="70" y="190" width="300" height="50" fill="#FFE6E6" stroke="#003262" stroke-width="1.5" rx="3"/>
+  <text x="220" y="210" font-family="Arial" font-size="12" font-weight="bold" text-anchor="middle">AR Drone 2.0 (Helper/Scout)</text>
+  <text x="220" y="228" font-family="Arial" font-size="10" text-anchor="middle">Dual Camera | IMU | Altitude Sensor</text>
+
+  <!-- Tello Drone Hardware -->
+  <rect x="430" y="190" width="300" height="50" fill="#E6F3FF" stroke="#003262" stroke-width="1.5" rx="3"/>
+  <text x="580" y="210" font-family="Arial" font-size="12" font-weight="bold" text-anchor="middle">DJI Tello (Parent/Payload)</text>
+  <text x="580" y="228" font-family="Arial" font-size="10" text-anchor="middle">720p Camera | IMU | Vision Positioning</text>
+
+  <!-- Layer 2: Perception -->
+  <rect x="50" y="280" width="700" height="120" fill="#f9f9f9" stroke="#003262" stroke-width="2" rx="5"/>
+  <text x="400" y="305" font-family="Arial" font-size="16" font-weight="bold" text-anchor="middle" fill="#003262">
+    Perception Layer
+  </text>
+
+  <!-- AR Drone Perception -->
+  <rect x="70" y="320" width="300" height="70" fill="#FFE6E6" stroke="#003262" stroke-width="1.5" rx="3"/>
+  <text x="220" y="340" font-family="Arial" font-size="11" font-weight="bold" text-anchor="middle">Vision Processing</text>
+  <text x="220" y="355" font-family="Arial" font-size="9" text-anchor="middle">• ArUco Marker Detection (OpenCV)</text>
+  <text x="220" y="368" font-family="Arial" font-size="9" text-anchor="middle">• Pose Estimation (PnP)</text>
+  <text x="220" y="381" font-family="Arial" font-size="9" text-anchor="middle">• Camera Frame Processing (30 FPS)</text>
+
+  <!-- Tello Drone Perception -->
+  <rect x="430" y="320" width="300" height="70" fill="#E6F3FF" stroke="#003262" stroke-width="1.5" rx="3"/>
+  <text x="580" y="340" font-family="Arial" font-size="11" font-weight="bold" text-anchor="middle">Vision Processing</text>
+  <text x="580" y="355" font-family="Arial" font-size="9" text-anchor="middle">• YOLOv8-nano Object Detection (10-15 FPS)</text>
+  <text x="580" y="368" font-family="Arial" font-size="9" text-anchor="middle">• Pinhole Distance Estimation</text>
+  <text x="580" y="381" font-family="Arial" font-size="9" text-anchor="middle">• Threat Assessment (3-level)</text>
+
+  <!-- Layer 3: Planning -->
+  <rect x="50" y="430" width="700" height="120" fill="#f0f0f0" stroke="#003262" stroke-width="2" rx="5"/>
+  <text x="400" y="455" font-family="Arial" font-size="16" font-weight="bold" text-anchor="middle" fill="#003262">
+    Planning Layer
+  </text>
+
+  <!-- AR Drone Planning -->
+  <rect x="70" y="470" width="300" height="70" fill="#FFE6E6" stroke="#003262" stroke-width="1.5" rx="3"/>
+  <text x="220" y="490" font-family="Arial" font-size="11" font-weight="bold" text-anchor="middle">Path Planning</text>
+  <text x="220" y="505" font-family="Arial" font-size="9" text-anchor="middle">• Grid Search (Snake Pattern)</text>
+  <text x="220" y="518" font-family="Arial" font-size="9" text-anchor="middle">• Transform Computation (Body→World)</text>
+  <text x="220" y="531" font-family="Arial" font-size="9" text-anchor="middle">• Waypoint Generation (5×5 grid)</text>
+
+  <!-- Tello Drone Planning -->
+  <rect x="430" y="470" width="300" height="70" fill="#E6F3FF" stroke="#003262" stroke-width="1.5" rx="3"/>
+  <text x="580" y="490" font-family="Arial" font-size="11" font-weight="bold" text-anchor="middle">Path Planning</text>
+  <text x="580" y="505" font-family="Arial" font-size="9" text-anchor="middle">• Linear Interpolation (Direct Paths)</text>
+  <text x="580" y="518" font-family="Arial" font-size="9" text-anchor="middle">• Bresenham's Algorithm (Discrete Waypoints)</text>
+  <text x="580" y="531" font-family="Arial" font-size="9" text-anchor="middle">• Reactive Obstacle Circumvention</text>
+
+  <!-- Layer 4: Control -->
+  <rect x="50" y="580" width="700" height="120" fill="#f9f9f9" stroke="#003262" stroke-width="2" rx="5"/>
+  <text x="400" y="605" font-family="Arial" font-size="16" font-weight="bold" text-anchor="middle" fill="#003262">
+    Control Layer
+  </text>
+
+  <!-- AR Drone Control -->
+  <rect x="70" y="620" width="300" height="70" fill="#FFE6E6" stroke="#003262" stroke-width="1.5" rx="3"/>
+  <text x="220" y="640" font-family="Arial" font-size="11" font-weight="bold" text-anchor="middle">Navigation Control</text>
+  <text x="220" y="655" font-family="Arial" font-size="9" text-anchor="middle">• Optical Centering (Proportional Control)</text>
+  <text x="220" y="668" font-family="Arial" font-size="9" text-anchor="middle">• IMU Positional Centering</text>
+  <text x="220" y="681" font-family="Arial" font-size="9" text-anchor="middle">• Velocity-based Commands</text>
+
+  <!-- Tello Drone Control -->
+  <rect x="430" y="620" width="300" height="70" fill="#E6F3FF" stroke="#003262" stroke-width="1.5" rx="3"/>
+  <text x="580" y="640" font-family="Arial" font-size="11" font-weight="bold" text-anchor="middle">Navigation Control</text>
+  <text x="580" y="655" font-family="Arial" font-size="9" text-anchor="middle">• PID Controller (±10cm accuracy)</text>
+  <text x="580" y="668" font-family="Arial" font-size="9" text-anchor="middle">• Dead Reckoning Position Estimator</text>
+  <text x="580" y="681" font-family="Arial" font-size="9" text-anchor="middle">• Command-based Movement</text>
+
+  <!-- Layer 5: Communication -->
+  <rect x="50" y="730" width="700" height="80" fill="#FFF9E6" stroke="#FDB515" stroke-width="3" rx="5"/>
+  <text x="400" y="755" font-family="Arial" font-size="16" font-weight="bold" text-anchor="middle" fill="#003262">
+    Communication &amp; Coordination Layer
+  </text>
+  <text x="400" y="775" font-family="Arial" font-size="11" text-anchor="middle">Transform Data Exchange (WiFi/Network)</text>
+  <text x="400" y="792" font-family="Arial" font-size="10" text-anchor="middle">AR Drone → Target Coordinates → Tello Drone</text>
+
+  <!-- Arrows showing data flow -->
+  <!-- AR Drone vertical flow -->
+  <line x1="220" y1="240" x2="220" y2="320" stroke="#003262" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <line x1="220" y1="390" x2="220" y2="470" stroke="#003262" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <line x1="220" y1="540" x2="220" y2="620" stroke="#003262" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- Tello Drone vertical flow -->
+  <line x1="580" y1="240" x2="580" y2="320" stroke="#003262" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <line x1="580" y1="390" x2="580" y2="470" stroke="#003262" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <line x1="580" y1="540" x2="580" y2="620" stroke="#003262" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- Communication arrows -->
+  <line x1="220" y1="690" x2="220" y2="730" stroke="#FDB515" stroke-width="2" marker-end="url(#arrowhead-gold)"/>
+  <line x1="580" y1="690" x2="580" y2="730" stroke="#FDB515" stroke-width="2" marker-end="url(#arrowhead-gold)"/>
+
+  <!-- Horizontal communication -->
+  <line x1="370" y1="770" x2="430" y2="770" stroke="#FDB515" stroke-width="3" marker-end="url(#arrowhead-gold)"/>
+
+  <!-- Footer -->
+  <text x="400" y="870" font-family="Arial" font-size="10" text-anchor="middle" fill="#666">
+    UC Berkeley EECS/ME 106a | Team 14: Agni Rajinikanth, Alan Bao, Nohl Abdelhadi, Imam Majed Alayeh
+  </text>
+</svg>

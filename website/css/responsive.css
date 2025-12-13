@@ -1,0 +1,282 @@
+/*
+ * Responsive Design
+ * Mobile and tablet breakpoints for academic website
+ */
+
+/* Tablet breakpoint (max-width: 1024px) */
+@media (max-width: 1024px) {
+  body {
+    font-size: 10pt;
+  }
+
+  .container {
+    padding: 0 0.5in;
+  }
+
+  .navbar-container {
+    padding: 0 0.5in;
+  }
+
+  /* Technical page: Stack TOC on top */
+  .technical-layout {
+    grid-template-columns: 1fr;
+    padding: 0 0.5in;
+  }
+
+  .toc {
+    position: relative;
+    top: 0;
+    margin-bottom: 2em;
+  }
+
+  /* Drone comparison: Reduce gap */
+  .drone-comparison {
+    gap: 1.5em;
+  }
+}
+
+/* Mobile breakpoint (max-width: 768px) */
+@media (max-width: 768px) {
+  body {
+    font-size: 9pt;
+  }
+
+  .container {
+    padding: 0 0.25in;
+  }
+
+  .navbar-container {
+    padding: 0 0.25in;
+    flex-direction: column;
+    gap: 1em;
+  }
+
+  .navbar-brand {
+    font-size: 1em;
+  }
+
+  .nav-links {
+    flex-direction: column;
+    gap: 0.8em;
+    width: 100%;
+  }
+
+  .nav-links a {
+    text-align: center;
+    padding: 0.5em;
+  }
+
+  /* Title block */
+  .title {
+    font-size: 1.5em;
+  }
+
+  .authors {
+    font-size: 1em;
+  }
+
+  .affiliation {
+    font-size: 0.9em;
+  }
+
+  /* Paragraphs: Disable justify on mobile */
+  p {
+    text-align: left;
+    hyphens: none;
+  }
+
+  /* Two-column layouts become single column */
+  .drone-comparison {
+    grid-template-columns: 1fr;
+    gap: 1em;
+  }
+
+  .results-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .image-gallery {
+    grid-template-columns: 1fr;
+  }
+
+  /* Technical page */
+  .technical-layout {
+    padding: 0 0.25in;
+  }
+
+  /* Section titles */
+  .section-title {
+    font-size: 1.3em;
+  }
+
+  .subsection-title {
+    font-size: 1.15em;
+  }
+
+  /* Tables: Make scrollable */
+  table {
+    font-size: 0.85em;
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  /* Code blocks: Reduce font size */
+  pre {
+    font-size: 0.75em;
+    padding: 0.8em;
+  }
+
+  /* Video container: Ensure proper aspect ratio */
+  .video-container {
+    margin: 1.5em 0;
+  }
+
+  /* Back to top button: Make smaller */
+  .back-to-top {
+    width: 40px;
+    height: 40px;
+    bottom: 1em;
+    right: 1em;
+  }
+
+  /* Abstract */
+  .abstract {
+    padding: 1em 1.5em;
+    margin: 1.5em 0;
+  }
+
+  /* Algorithm cards */
+  .algorithm-card {
+    padding: 1em;
+  }
+
+  /* Challenge items */
+  .challenge-item,
+  .result-item {
+    padding: 1em;
+  }
+
+  /* Footer */
+  .footer {
+    padding: 1.5em 0;
+  }
+
+  .footer p {
+    font-size: 0.9em;
+  }
+}
+
+/* Very small mobile (max-width: 480px) */
+@media (max-width: 480px) {
+  body {
+    font-size: 8.5pt;
+  }
+
+  .container {
+    padding: 0 0.2in;
+  }
+
+  .title {
+    font-size: 1.3em;
+  }
+
+  .section-title {
+    font-size: 1.2em;
+  }
+
+  .subsection-title {
+    font-size: 1.05em;
+  }
+
+  .drone-card,
+  .algorithm-card,
+  .challenge-item,
+  .result-item {
+    padding: 0.8em;
+  }
+
+  h1 {
+    font-size: 1.5em;
+  }
+
+  h2 {
+    font-size: 1.3em;
+  }
+
+  h3 {
+    font-size: 1.15em;
+  }
+
+  h4 {
+    font-size: 1.05em;
+  }
+}
+
+/* Print styles */
+@media print {
+  body {
+    font-size: 11pt;
+    background: white;
+  }
+
+  .navbar {
+    display: none;
+  }
+
+  .toc {
+    position: relative;
+    top: 0;
+    page-break-before: always;
+  }
+
+  .back-to-top {
+    display: none;
+  }
+
+  .footer {
+    background: none;
+    color: black;
+    border-top: 2px solid black;
+  }
+
+  a {
+    color: black;
+    text-decoration: underline;
+  }
+
+  .video-container {
+    border: 2px solid black;
+  }
+
+  .video-container::after {
+    content: "Video available at: https://nohlaaaron.github.io/EECSc106aFinal/";
+    display: block;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: white;
+    padding: 1em;
+  }
+
+  /* Page breaks */
+  h2, h3 {
+    page-break-after: avoid;
+  }
+
+  figure, table, pre {
+    page-break-inside: avoid;
+  }
+
+  /* Remove shadows and backgrounds for print */
+  .drone-card,
+  .algorithm-card,
+  .challenge-item,
+  .result-item,
+  .abstract {
+    box-shadow: none;
+    background: white;
+    border: 1px solid black;
+  }
+}

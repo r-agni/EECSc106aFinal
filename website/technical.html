@@ -1,0 +1,1149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Technical Details: Drone Cooperative System Algorithms and Implementation">
+  <meta name="keywords" content="YOLOv8, ArUco, PID control, dead reckoning, Bresenham algorithm, object detection">
+  <meta name="author" content="Team 14: Agni Rajinikanth, Alan Bao, Nohl Abdelhadi, Imam Majed Alayeh">
+
+  <title>Technical Details | Drone Cooperative System</title>
+
+  <!-- Stylesheets -->
+  <link rel="stylesheet" href="css/paper.css">
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/responsive.css">
+
+  <!-- MathJax for equation rendering -->
+  <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true
+      },
+      svg: {
+        fontCache: 'global'
+      }
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js" async></script>
+</head>
+<body>
+  <!-- Navigation Bar -->
+  <nav class="navbar">
+    <div class="navbar-container">
+      <a href="./" class="navbar-brand">Team 14 | EECS 106a</a>
+      <div class="nav-links">
+        <a href="index.html">Home</a>
+        <a href="technical.html">Technical Details</a>
+        <a href="design-choices.html">Design Choices</a>
+        <a href="code-snippets.html">Code Snippets</a>
+        <a href="team.html">Team</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Technical Layout with Sidebar TOC -->
+  <div class="technical-layout">
+    <!-- Table of Contents Sidebar -->
+    <aside class="toc">
+      <h3>Contents</h3>
+      <ul>
+        <li><a href="#ar-drone">1. AR Drone System</a>
+          <ul>
+            <li><a href="#aruco">1.1 ArUco Detection</a></li>
+            <li><a href="#grid-search">1.2 Grid Search</a></li>
+            <li><a href="#transform">1.3 Transform Computation</a></li>
+            <li><a href="#optical-centering">1.4 Optical Centering</a></li>
+            <li><a href="#imu-centering">1.5 IMU Centering</a></li>
+          </ul>
+        </li>
+        <li><a href="#tello">2. Tello Drone System</a>
+          <ul>
+            <li><a href="#yolo">2.1 YOLOv8 Detection</a></li>
+            <li><a href="#distance">2.2 Distance Estimation</a></li>
+            <li><a href="#threat">2.3 Threat Assessment</a></li>
+            <li><a href="#avoidance">2.4 Obstacle Avoidance</a></li>
+            <li><a href="#pid">2.5 PID Controller</a></li>
+            <li><a href="#dead-reckoning">2.6 Dead Reckoning</a></li>
+            <li><a href="#bresenham">2.7 Hybrid Path Planning</a></li>
+          </ul>
+        </li>
+        <li><a href="#equations">3. Key Equations</a></li>
+        <li><a href="#integration">4. System Integration</a></li>
+      </ul>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <h1>Technical Details</h1>
+      <p>
+        This page provides comprehensive technical documentation of all algorithms, mathematical formulations, and implementation
+        details for the drone cooperative system. Each section includes equations, pseudocode, performance metrics, and design rationale.
+      </p>
+
+      <!-- System Architecture Diagram -->
+      <figure style="margin: 2em 0;">
+        <img src="assets/images/system-architecture.svg" alt="System Architecture Diagram" style="max-width: 100%;">
+      </figure>
+
+      <!-- Section 1: AR Drone System -->
+      <section id="ar-drone" class="section">
+        <h2 class="section-title">1. AR Drone (Helper/Scout) System</h2>
+        <p>
+          The AR Drone serves as a high-altitude scout, performing grid-based search patterns to locate ArUco markers and
+          computing world-frame transforms for target localization.
+        </p>
+
+        <!-- AR Drone Pipeline Diagram -->
+        <figure style="margin: 2em 0;">
+          <img src="assets/images/ar-drone-pipeline.svg" alt="AR Drone Navigation Pipeline" style="max-width: 100%;">
+        </figure>
+
+        <!-- 1.1 ArUco Marker Detection -->
+        <section id="aruco" class="algorithm-card">
+          <h3>1.1 ArUco Marker Detection</h3>
+
+          <h4>Overview</h4>
+          <p>
+            ArUco markers are fiducial markers used for precise pose estimation and localization. The system detects markers in
+            video frames using OpenCV and estimates the drone's position relative to them with ±2cm accuracy at 1m distance.
+          </p>
+
+          <h4>Detection Algorithm</h4>
+          <p><strong>Dictionary:</strong> DICT_4X4_50 (50 unique 4×4 markers)</p>
+          <p><strong>Process:</strong></p>
+          <ol>
+            <li>Convert frame to grayscale: $I_{gray} = \text{RGB2Gray}(I)$</li>
+            <li>Adaptive thresholding with block size 11</li>
+            <li>Contour detection and square filtering</li>
+            <li>Perspective transform to canonical view</li>
+            <li>Binary pattern decoding and validation</li>
+          </ol>
+
+          <h4>Pose Estimation (PnP)</h4>
+          <p>Given 4 corner points in image space and known marker size $L$ (15cm), solve the Perspective-n-Point problem:</p>
+
+          <div class="equation-display">
+            $$
+            \begin{bmatrix} R & t \\ 0 & 1 \end{bmatrix} = \text{solvePnP}(M, P, K, D)
+            $$
+          </div>
+
+          <p>Where:</p>
+          <ul>
+            <li>$R \in SO(3)$ is the 3×3 rotation matrix</li>
+            <li>$t \in \mathbb{R}^3$ is the translation vector</li>
+            <li>$M$ = 3D marker corners in marker frame</li>
+            <li>$P$ = 2D corner points in image (pixels)</li>
+            <li>$K$ = camera intrinsic matrix</li>
+            <li>$D$ = distortion coefficients</li>
+          </ul>
+
+          <h4>Camera Intrinsic Matrix</h4>
+          <p>For AR Drone camera (640×480):</p>
+          <div class="equation-display">
+            $$
+            K = \begin{bmatrix}
+            700 & 0 & 320 \\
+            0 & 700 & 240 \\
+            0 & 0 & 1
+            \end{bmatrix}
+            $$
+          </div>
+
+          <h4>Distance to Marker</h4>
+          <div class="equation-display">
+            $$
+            d = \|t\| = \sqrt{t_x^2 + t_y^2 + t_z^2}
+            $$
+          </div>
+
+          <h4>Performance</h4>
+          <table class="metrics-table">
+            <thead>
+              <tr>
+                <th>Distance</th>
+                <th>Position Error</th>
+                <th>Angle Error</th>
+                <th>Detection Rate</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>0.5m</td><td>±1cm</td><td>±1°</td><td>30 FPS</td></tr>
+              <tr><td>1.0m</td><td>±2cm</td><td>±2°</td><td>30 FPS</td></tr>
+              <tr><td>2.0m</td><td>±5cm</td><td>±3°</td><td>28 FPS</td></tr>
+              <tr><td>3.0m</td><td>±10cm</td><td>±5°</td><td>25 FPS</td></tr>
+            </tbody>
+          </table>
+
+          <p><strong>Implementation:</strong> See <code>AR Drone/aruco_detection/detector.py</code></p>
+        </section>
+
+        <!-- 1.2 Grid Search Algorithm -->
+        <section id="grid-search" class="algorithm-card">
+          <h3>1.2 Grid Search Algorithm</h3>
+
+          <h4>Overview</h4>
+          <p>
+            Systematic grid-based search pattern for finding ArUco markers. Uses a snake/boustrophedon traversal pattern
+            to efficiently cover a 5×5 grid with 0.5m cell size.
+          </p>
+
+          <h4>Snake Pattern Traversal</h4>
+          <p>The algorithm moves left-to-right on even rows, right-to-left on odd rows:</p>
+          <pre><code>Row 0: → → → → →
+Row 1: ← ← ← ← ←
+Row 2: → → → → →
+Row 3: ← ← ← ← ←
+Row 4: → → → → →</code></pre>
+
+          <h4>State Tracking</h4>
+          <p>Each cell has one of four states:</p>
+          <ul>
+            <li><strong>0 - Unexplored:</strong> Cell not yet visited</li>
+            <li><strong>1 - Exploring:</strong> Currently searching this cell</li>
+            <li><strong>2 - Explored:</strong> Search complete, no target found</li>
+            <li><strong>3 - Target Found:</strong> ArUco marker detected in this cell</li>
+          </ul>
+
+          <h4>Pseudocode</h4>
+          <pre><code>def snake_pattern(grid_size):
+    waypoints = []
+    for row in range(grid_size):
+        if row % 2 == 0:
+            # Left to right
+            for col in range(grid_size):
+                waypoints.append((row, col))
+        else:
+            # Right to left
+            for col in range(grid_size - 1, -1, -1):
+                waypoints.append((row, col))
+    return waypoints</code></pre>
+
+          <h4>Cell-to-World Coordinate Conversion</h4>
+          <p>Convert grid cell $(r, c)$ to world coordinates:</p>
+          <div class="equation-display">
+            $$
+            \begin{align}
+            x_m &= (c - c_{start}) \times \text{cell\_size} \\
+            y_m &= (r - r_{start}) \times \text{cell\_size}
+            \end{align}
+            $$
+          </div>
+
+          <p>Where $(r_{start}, c_{start})$ is the starting cell (typically grid center).</p>
+
+          <figure>
+            <img src="assets/images/ar-drone-path-graph.png" alt="Grid Search Pattern Visualization" style="max-width: 100%;">
+            <figcaption>Figure: Grid search trajectory showing waypoint coverage and path optimization</figcaption>
+          </figure>
+
+          <p><strong>Implementation:</strong> See <code>AR Drone/path_planning/grid_search.py</code></p>
+        </section>
+
+        <!-- 1.3 Transform Computation -->
+        <section id="transform" class="algorithm-card">
+          <h3>1.3 Transform Computation (Body Frame → World Frame)</h3>
+
+          <h4>Overview</h4>
+          <p>
+            Computes world-frame position by integrating body-frame velocities over time, using IMU yaw data to rotate
+            velocities into the world frame.
+          </p>
+
+          <h4>Coordinate Frames</h4>
+          <ul>
+            <li><strong>Body Frame:</strong> Forward (+x), Right (+y), Down (+z) relative to drone</li>
+            <li><strong>World Frame:</strong> North (+x), East (+y), Down (+z) relative to origin</li>
+          </ul>
+
+          <h4>Transform Equations</h4>
+          <p>For each time step $\Delta t$ with velocity command $(v_x, v_y)$ and yaw $\psi$:</p>
+
+          <div class="equation-display">
+            $$
+            \begin{align}
+            x' &= x + v_x \cdot \cos(\psi) \cdot \Delta t - v_y \cdot \sin(\psi) \cdot \Delta t \\
+            y' &= y + v_x \cdot \sin(\psi) \cdot \Delta t + v_y \cdot \cos(\psi) \cdot \Delta t
+            \end{align}
+            $$
+          </div>
+
+          <h4>Example Transform Calculation</h4>
+          <p>Measured data from actual flight:</p>
+          <ul>
+            <li>$\Delta x = 1.251$ m (right +, left −)</li>
+            <li>$\Delta y = 4.018$ m (forward +, back −)</li>
+            <li>$\Delta\psi = -0.08°$ (yaw drift)</li>
+          </ul>
+
+          <figure>
+            <img src="assets/images/AR-drone-logs-output.png" alt="Transform Computation Logs" style="max-width: 100%;">
+            <figcaption>Figure: System logs showing velocity integration and position estimation</figcaption>
+          </figure>
+
+          <h4>Error Analysis</h4>
+          <p>Position error accumulates as:</p>
+          <div class="equation-display">
+            $$
+            \sigma_{pos} \approx \sqrt{n} \cdot \sigma_{cmd} + D \cdot \sin(\sigma_\psi)
+            $$
+          </div>
+          <p>Where $n$ is number of movements, $D$ is total distance, and $\sigma$ terms are individual errors.</p>
+
+          <p><strong>Typical Accuracy:</strong> ±10cm after 3m flight with 6 movements</p>
+        </section>
+
+        <!-- 1.4 Optical Centering -->
+        <section id="optical-centering" class="algorithm-card">
+          <h3>1.4 Optical Centering (Proportional Control)</h3>
+
+          <h4>Overview</h4>
+          <p>
+            Pixel-based proportional control system that centers the drone above an ArUco marker by aligning the marker's
+            center with the image center.
+          </p>
+
+          <h4>Control Algorithm</h4>
+          <ol>
+            <li>Detect ArUco marker in frame</li>
+            <li>Calculate marker center: $c_{tag} = (x_{tag}, y_{tag})$</li>
+            <li>Calculate image center: $c_{img} = (w/2, h/2)$</li>
+            <li>Compute error: $e = c_{tag} - c_{img}$</li>
+            <li>Apply proportional control: $u = K_p \cdot e$</li>
+          </ol>
+
+          <h4>Control Law</h4>
+          <div class="equation-display">
+            $$
+            \begin{align}
+            e_x &= x_{tag} - \frac{w}{2} \\
+            e_y &= y_{tag} - \frac{h}{2} \\
+            u_x &= K_p \cdot e_x \\
+            u_y &= K_p \cdot e_y
+            \end{align}
+            $$
+          </div>
+
+          <p>Where $K_p = 0.3$ (tuned proportional gain).</p>
+
+          <h4>Demonstration Video</h4>
+          <div class="video-container">
+            <iframe
+              src="https://www.youtube.com/embed/NWBAYWgyoZQ"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowfullscreen>
+            </iframe>
+          </div>
+          <figcaption>Optical centering demonstration showing proportional control convergence</figcaption>
+
+          <figure style="margin-top: 2em;">
+            <img src="assets/images/optimal-centering-iamge.png" alt="Optical Centering Diagram" style="max-width: 100%;">
+            <figcaption>Figure: Optical centering algorithm visualization</figcaption>
+          </figure>
+        </section>
+
+        <!-- 1.5 IMU Positional Centering -->
+        <section id="imu-centering" class="algorithm-card">
+          <h3>1.5 IMU Positional Centering</h3>
+
+          <h4>Overview</h4>
+          <p>
+            Uses instantaneous velocity measurements and IMU integration to maintain centered position above marker,
+            compensating for wind and drift.
+          </p>
+
+          <h4>Velocity Integration</h4>
+          <div class="equation-display">
+            $$
+            \begin{align}
+            \Delta d &= v \cdot \Delta t \\
+            x' &= x + \sum \Delta d_x \\
+            y' &= y + \sum \Delta d_y
+            \end{align}
+            $$
+          </div>
+
+          <h4>Proportional Correction</h4>
+          <p>After disturbances (wind, takeoff drift), apply correction:</p>
+          <div class="equation-display">
+            $$
+            u_{correct} = K_p \cdot (x_{target} - x_{current})
+            $$
+          </div>
+
+          <p><strong>Performance:</strong> ±5cm accuracy with disturbance rejection</p>
+        </section>
+      </section>
+
+      <!-- Section 2: Tello Drone System -->
+      <section id="tello" class="section">
+        <h2 class="section-title">2. Tello Drone (Parent/Payload) System</h2>
+        <p>
+          The Tello Drone executes low-altitude navigation with real-time obstacle detection, distance estimation, reactive
+          avoidance, and precision landing control.
+        </p>
+
+        <!-- Tello Pipeline Diagram -->
+        <figure style="margin: 2em 0;">
+          <img src="assets/images/tello-pipeline.svg" alt="Tello Navigation Pipeline" style="max-width: 100%;">
+        </figure>
+
+        <!-- 2.1 YOLOv8 Object Detection -->
+        <section id="yolo" class="algorithm-card">
+          <h3>2.1 YOLOv8 Object Detection Pipeline</h3>
+
+          <h4>Overview</h4>
+          <p>
+            YOLOv8 (You Only Look Once v8) performs real-time object detection, identifying and localizing 80+ object classes
+            in a single forward pass through a convolutional neural network.
+          </p>
+
+          <h4>Model Specifications</h4>
+          <ul>
+            <li><strong>Variant:</strong> YOLOv8-nano</li>
+            <li><strong>Parameters:</strong> 3.2 million (6MB file size)</li>
+            <li><strong>Performance:</strong> 10-15 FPS on Tello</li>
+            <li><strong>Accuracy:</strong> 89.7% mAP on COCO dataset</li>
+            <li><strong>Classes:</strong> 80 object categories (person, chair, bottle, etc.)</li>
+          </ul>
+
+          <h4>Network Architecture</h4>
+          <pre><code>Input (320×240) → Backbone (CSPDarknet) → Neck (PANet) → Head → Detections</code></pre>
+
+          <h4>Detection Output</h4>
+          <p>Each detection $d_i$ contains:</p>
+          <div class="equation-display">
+            $$
+            d_i = (\text{bbox}, \text{class}, \text{confidence})
+            $$
+          </div>
+          <p>Where:</p>
+          <ul>
+            <li>$\text{bbox} = (x_1, y_1, x_2, y_2)$ are bounding box coordinates</li>
+            <li>$\text{class} \in \{\text{person}, \text{chair}, \text{bottle}, \ldots\}$</li>
+            <li>$\text{confidence} \in [0, 1]$ is detection confidence</li>
+          </ul>
+
+          <h4>Detection Filtering</h4>
+          <p>Filter detections by confidence threshold $\theta = 0.5$:</p>
+          <div class="equation-display">
+            $$
+            D_{filtered} = \{d \in D \mid \text{confidence}(d) \geq 0.5\}
+            $$
+          </div>
+
+          <h4>Implementation</h4>
+          <pre><code># YOLOv8 Detection
+results = model(frame, conf=0.5, verbose=False)
+
+for box in results[0].boxes:
+    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+    confidence = float(box.conf[0])
+    class_id = int(box.cls[0])
+    class_name = model.names[class_id]</code></pre>
+
+          <p><strong>Code:</strong> See <code>Tello/obstacle_avoidance/obstacle_detector.py</code></p>
+        </section>
+
+        <!-- 2.2 Pinhole Camera Distance Estimation -->
+        <section id="distance" class="algorithm-card">
+          <h3>2.2 Pinhole Camera Distance Estimation</h3>
+
+          <h4>Overview</h4>
+          <p>
+            Estimates distance to detected objects using the pinhole camera model and known object dimensions, providing
+            monocular depth estimation without requiring a depth sensor.
+          </p>
+
+          <h4>Pinhole Camera Equation</h4>
+          <div class="equation-display">
+            $$
+            d = \frac{H \times f}{h}
+            $$
+          </div>
+          <p>Where:</p>
+          <ul>
+            <li>$d$ = distance to object (meters)</li>
+            <li>$H$ = known real-world height of object (meters)</li>
+            <li>$f$ = focal length of camera (700 pixels, calibrated)</li>
+            <li>$h$ = pixel height of object in image</li>
+          </ul>
+
+          <h4>Derivation (Similar Triangles)</h4>
+          <pre><code>Real World              Image Plane
+    ↓                         ↓
+|----H----|              |--h--|
+|         |              |     |
+|  Object |      →      Camera
+|         |              |     |
+|---------|              |-----|
+    ↑                         ↑
+Distance d            Focal length f
+
+Similar triangles: H/d = h/f
+Solving for d: d = (H × f) / h</code></pre>
+
+          <h4>Object Height Database</h4>
+          <table class="metrics-table">
+            <thead>
+              <tr><th>Object Class</th><th>Height (m)</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>person</td><td>1.7</td></tr>
+              <tr><td>chair</td><td>0.9</td></tr>
+              <tr><td>bottle</td><td>0.25</td></tr>
+              <tr><td>cup</td><td>0.12</td></tr>
+              <tr><td>laptop</td><td>0.02</td></tr>
+              <tr><td>tv</td><td>0.6</td></tr>
+            </tbody>
+          </table>
+
+          <h4>Focal Length Calibration</h4>
+          <p>Empirical calibration process:</p>
+          <div class="equation-display">
+            $$
+            f = \frac{h \times d}{H}
+            $$
+          </div>
+          <p>Example: Place person (H = 1.7m) at d = 2.0m, measure h = 150 pixels:</p>
+          <div class="equation-display">
+            $$
+            f = \frac{150 \times 2.0}{1.7} \approx 176.5 \text{ pixels}
+            $$
+          </div>
+          <p><strong>Configured value:</strong> f = 700 pixels (empirically tuned for Tello camera)</p>
+
+          <h4>Error Analysis</h4>
+          <p>Relative error scales with pixel measurement error:</p>
+          <div class="equation-display">
+            $$
+            \epsilon = \frac{\Delta d}{d} = \frac{\Delta h}{h}
+            $$
+          </div>
+
+          <table class="metrics-table">
+            <thead>
+              <tr><th>Distance</th><th>Pixel Height</th><th>Error (±2px)</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>0.5m</td><td>600px</td><td>0.7%</td></tr>
+              <tr><td>1.0m</td><td>300px</td><td>1.3%</td></tr>
+              <tr><td>2.0m</td><td>150px</td><td>2.7%</td></tr>
+              <tr><td>5.0m</td><td>60px</td><td>6.7%</td></tr>
+              <tr><td>10.0m</td><td>30px</td><td>13.3%</td></tr>
+            </tbody>
+          </table>
+
+          <p><strong>Typical Accuracy:</strong> ±20% at 5m distance</p>
+        </section>
+
+        <!-- 2.3 Threat Assessment -->
+        <section id="threat" class="algorithm-card">
+          <h3>2.3 Threat Assessment Algorithm</h3>
+
+          <h4>Overview</h4>
+          <p>
+            Classifies detected obstacles into threat levels (HIGH, MEDIUM, LOW) based on distance and position relative
+            to the drone's flight path.
+          </p>
+
+          <h4>Position Classification</h4>
+          <p>Bounding box center $x_c = (x_1 + x_2) / 2$ determines position:</p>
+          <div class="equation-display">
+            $$
+            \text{position} = \begin{cases}
+            \text{LEFT} & \text{if } x_c < W/3 \\
+            \text{CENTER} & \text{if } W/3 \leq x_c \leq 2W/3 \\
+            \text{RIGHT} & \text{if } x_c > 2W/3
+            \end{cases}
+            $$
+          </div>
+          <p>Where $W = 320$ pixels (image width).</p>
+
+          <h4>Threat Level Determination</h4>
+          <p><strong>For CENTER obstacles (direct collision path):</strong></p>
+          <div class="equation-display">
+            $$
+            \text{threat} = \begin{cases}
+            \text{HIGH} & \text{if } d < 1.5\text{m} \\
+            \text{MEDIUM} & \text{if } 1.5\text{m} \leq d < 2.5\text{m} \\
+            \text{LOW} & \text{if } d \geq 2.5\text{m}
+            \end{cases}
+            $$
+          </div>
+
+          <p><strong>For LEFT/RIGHT obstacles:</strong></p>
+          <div class="equation-display">
+            $$
+            \text{threat} = \begin{cases}
+            \text{MEDIUM} & \text{if } d < 1.05\text{m} \\
+            \text{LOW} & \text{if } d \geq 1.05\text{m}
+            \end{cases}
+            $$
+          </div>
+          <p>Note: Side threshold is 70% of center HIGH threshold (1.05m = 0.7 × 1.5m)</p>
+
+          <h4>Threat Decision Matrix</h4>
+          <table class="metrics-table">
+            <thead>
+              <tr><th>Position</th><th>&lt; 1.05m</th><th>1.05-1.5m</th><th>1.5-2.5m</th><th>&gt; 2.5m</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>CENTER</td><td>HIGH</td><td>HIGH</td><td>MEDIUM</td><td>LOW</td></tr>
+              <tr><td>LEFT</td><td>MEDIUM</td><td>LOW</td><td>LOW</td><td>LOW</td></tr>
+              <tr><td>RIGHT</td><td>MEDIUM</td><td>LOW</td><td>LOW</td><td>LOW</td></tr>
+            </tbody>
+          </table>
+
+          <h4>Response Actions</h4>
+          <ul>
+            <li><strong>HIGH threat:</strong> Emergency stop + vertical/lateral dodge</li>
+            <li><strong>MEDIUM threat:</strong> Slow approach + prepare avoidance</li>
+            <li><strong>LOW threat:</strong> Continue with monitoring</li>
+          </ul>
+        </section>
+
+        <!-- 2.4 Obstacle Avoidance -->
+        <section id="avoidance" class="algorithm-card">
+          <h3>2.4 Obstacle Avoidance Maneuvers</h3>
+
+          <h4>Overview</h4>
+          <p>
+            Reactive obstacle avoidance using pre-planned dodge maneuvers that ensure the drone returns to its original path
+            after avoiding an obstacle. <strong>Key property:</strong> Net displacement = 0 (path preservation).
+          </p>
+
+          <h4>Lateral Dodge Maneuver</h4>
+          <p>Three-step balanced maneuver:</p>
+          <ol>
+            <li>Move sideways: $y_1 = y_0 + D_{lateral}$ (80cm)</li>
+            <li>Move forward: $x_2 = x_0 + d + w/2 + m$ (pass obstacle)</li>
+            <li>Move back sideways: $y_3 = y_0$ (return to path)</li>
+          </ol>
+
+          <p><strong>Net displacement:</strong> $\Delta y = y_3 - y_0 = 0$ ✓</p>
+
+          <div class="equation-display">
+            $$
+            \begin{align}
+            D_{lateral} &= 80\text{cm} \\
+            d_{pass} &= d + \frac{w}{2} + m \\
+            m &= 50\text{cm (clearance margin)}
+            \end{align}
+            $$
+          </div>
+
+          <h4>Vertical Dodge Maneuver</h4>
+          <p>For wide obstacles (w > threshold):</p>
+          <ol>
+            <li>Move up: $z_1 = z_0 + D_{vertical}$ (60cm)</li>
+            <li>Move forward: $x_2 = x_0 + d + w/2 + m$</li>
+            <li>Move down: $z_3 = z_0$ (return to altitude)</li>
+          </ol>
+
+          <p><strong>Net displacement:</strong> $\Delta z = z_3 - z_0 = 0$ ✓</p>
+
+          <h4>Maneuver Diagram</h4>
+          <pre><code>                Obstacle
+                   🚧
+                   │
+START ────────┐    │    ┌─────────> GOAL
+   (x₀,y₀)    │    │    │
+              │    │    │
+          1.  ↓    │    ↑  3.
+         (lateral) │ (lateral)
+                   │
+              ────→│────→
+                2. forward
+                 (pass)</code></pre>
+
+          <h4>Benefits</h4>
+          <ul>
+            <li>✓ <strong>Mathematically balanced:</strong> Returns to exact original path</li>
+            <li>✓ <strong>Endpoint preservation:</strong> Final position unaffected by detours</li>
+            <li>✓ <strong>Predictable:</strong> Deterministic maneuver sequence</li>
+            <li>✓ <strong>Safe:</strong> 50cm clearance margin</li>
+          </ul>
+
+          <h4>Trade-offs</h4>
+          <ul>
+            <li>⚠️ Increases flight time by 10-20%</li>
+            <li>⚠️ Battery cost ~5-10% per maneuver</li>
+            <li>✓ Guarantees target accuracy (critical for landing)</li>
+          </ul>
+
+          <p><strong>Code:</strong> See <code>Tello/obstacle_avoidance/circumvent.py</code></p>
+        </section>
+
+        <!-- 2.5 PID Controller -->
+        <section id="pid" class="algorithm-card">
+          <h3>2.5 PID Controller (Position Control)</h3>
+
+          <h4>Overview</h4>
+          <p>
+            PID (Proportional-Integral-Derivative) controller for precise position control and landing, using feedback from
+            position estimation to minimize error and achieve ±10cm accuracy.
+          </p>
+
+          <h4>PID Control Law</h4>
+          <div class="equation-display">
+            $$
+            u(t) = K_p \cdot e(t) + K_i \cdot \int e(\tau) d\tau + K_d \cdot \frac{de(t)}{dt}
+            $$
+          </div>
+          <p>Where:</p>
+          <ul>
+            <li>$e(t) = \text{target} - \text{current}$ is the error</li>
+            <li>$K_p$ = proportional gain (immediate response)</li>
+            <li>$K_i$ = integral gain (eliminates steady-state error)</li>
+            <li>$K_d$ = derivative gain (dampens oscillations)</li>
+          </ul>
+
+          <h4>Discrete-Time Implementation</h4>
+          <p>At time step $k$ with sampling period $\Delta t$:</p>
+          <div class="equation-display">
+            $$
+            \begin{align}
+            e[k] &= \text{target} - \text{current}[k] \\
+            P[k] &= K_p \times e[k] \\
+            I[k] &= I[k-1] + K_i \times e[k] \times \Delta t \\
+            D[k] &= K_d \times \frac{e[k] - e[k-1]}{\Delta t} \\
+            u[k] &= P[k] + I[k] + D[k]
+            \end{align}
+            $$
+          </div>
+
+          <h4>Anti-Windup (Integral Clamping)</h4>
+          <p>Prevent integral term from growing unbounded:</p>
+          <div class="equation-display">
+            $$
+            I[k] = \text{clamp}(I[k], -I_{max}, I_{max})
+            $$
+          </div>
+          <p>Where $I_{max} = 50$cm.</p>
+
+          <h4>Deadband</h4>
+          <p>Prevent oscillation near target:</p>
+          <div class="equation-display">
+            $$
+            \text{if } |e[k]| < \epsilon_{deadband}: \quad e[k] = 0, \quad I[k] = 0
+            $$
+          </div>
+          <p>Where $\epsilon_{deadband} = 10$cm for position, 5° for yaw.</p>
+
+          <h4>Tuned PID Gains</h4>
+          <table class="metrics-table">
+            <thead>
+              <tr><th>Axis</th><th>K<sub>p</sub></th><th>K<sub>i</sub></th><th>K<sub>d</sub></th><th>Performance</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>X, Y, Z</td><td>1.0</td><td>0.1</td><td>0.3</td><td>±10cm, 2-3 iterations</td></tr>
+              <tr><td>Yaw</td><td>0.5</td><td>0.05</td><td>0.1</td><td>±5°, 1-2 iterations</td></tr>
+            </tbody>
+          </table>
+
+          <h4>Example Correction Sequence</h4>
+          <p>Target: (200cm, 100cm, 120cm, 45°)</p>
+          <pre><code>Iteration 1: Position (185, 95, 115, 40°)
+  Error: (15, 5, 5, 5°)
+  Command: forward(15cm), right(5cm), up(5cm), rotate(5°)
+
+Iteration 2: Position (198, 102, 118, 43°)
+  Error: (2, -2, 2, 2°)
+  Command: forward(2cm), left(2cm), up(2cm), rotate(2°)
+
+Iteration 3: Position (201, 99, 121, 46°)
+  Error: (-1, 1, -1, -1°)
+  Within tolerance ✓
+
+Final: (201, 99, 121, 46°) - Error: &lt;10cm, &lt;5°</code></pre>
+
+          <p><strong>Code:</strong> See <code>Tello/pid_controller/position_controller.py</code></p>
+        </section>
+
+        <!-- 2.6 Dead Reckoning -->
+        <section id="dead-reckoning" class="algorithm-card">
+          <h3>2.6 Dead Reckoning (Position Estimation)</h3>
+
+          <h4>Overview</h4>
+          <p>
+            Estimates drone position by integrating movement commands and IMU data, tracking position in 3D space relative
+            to takeoff point.
+          </p>
+
+          <h4>State Vector</h4>
+          <div class="equation-display">
+            $$
+            s = \begin{bmatrix} x \\ y \\ z \\ \psi \end{bmatrix}
+            $$
+          </div>
+          <p>Where $(x, y, z)$ is position in cm, $\psi$ is yaw in degrees.</p>
+
+          <h4>Update Equations</h4>
+          <p>For movement command with distance $d$:</p>
+
+          <p><strong>Forward:</strong></p>
+          <div class="equation-display">
+            $$
+            \begin{align}
+            x' &= x + d \cdot \cos(\psi \cdot \pi/180) \\
+            y' &= y + d \cdot \sin(\psi \cdot \pi/180)
+            \end{align}
+            $$
+          </div>
+
+          <p><strong>Backward:</strong></p>
+          <div class="equation-display">
+            $$
+            \begin{align}
+            x' &= x - d \cdot \cos(\psi \cdot \pi/180) \\
+            y' &= y - d \cdot \sin(\psi \cdot \pi/180)
+            \end{align}
+            $$
+          </div>
+
+          <p><strong>Left:</strong></p>
+          <div class="equation-display">
+            $$
+            \begin{align}
+            x' &= x + d \cdot \cos((\psi - 90) \cdot \pi/180) \\
+            y' &= y + d \cdot \sin((\psi - 90) \cdot \pi/180)
+            \end{align}
+            $$
+          </div>
+
+          <p><strong>Right:</strong></p>
+          <div class="equation-display">
+            $$
+            \begin{align}
+            x' &= x + d \cdot \cos((\psi + 90) \cdot \pi/180) \\
+            y' &= y + d \cdot \sin((\psi + 90) \cdot \pi/180)
+            \end{align}
+            $$
+          </div>
+
+          <p><strong>Vertical:</strong></p>
+          <div class="equation-display">
+            $$
+            z' = z \pm d
+            $$
+          </div>
+
+          <p><strong>Rotation:</strong></p>
+          <div class="equation-display">
+            $$
+            \psi' = (\psi \pm \theta) \bmod 360
+            $$
+          </div>
+
+          <h4>Coordinate Frame</h4>
+          <pre><code>      Y (Right)
+      ↑
+      │
+      │
+      └────→ X (Forward)
+     ⊙
+     Z (Up)
+
+Origin: Takeoff position</code></pre>
+
+          <h4>Error Accumulation</h4>
+          <p>Cumulative error after $n$ movements over distance $D$:</p>
+          <div class="equation-display">
+            $$
+            \sigma_{pos} \approx \sqrt{n} \cdot \sigma_{cmd} + D \cdot \sin(\sigma_\psi)
+            $$
+          </div>
+          <p>Example: After 6 moves over 3m:</p>
+          <div class="equation-display">
+            $$
+            \sigma_{pos} \approx \sqrt{6} \times 5\text{cm} + 300\text{cm} \times \sin(3°) \approx 28\text{cm}
+            $$
+          </div>
+
+          <p><strong>Typical Accuracy:</strong> ±10-30cm per 3m traveled</p>
+
+          <p><strong>Code:</strong> See <code>Tello/obstacle_avoidance/path_executor.py</code></p>
+        </section>
+
+        <!-- 2.7 Hybrid Path Planning -->
+        <section id="bresenham" class="algorithm-card">
+          <h3>2.7 Hybrid Path Planning: Linear Interpolation + Bresenham</h3>
+
+          <h4>Overview</h4>
+          <p>
+            The Tello Drone uses a <strong>hybrid approach</strong> combining linear interpolation for direct path generation
+            with Bresenham's algorithm for discrete waypoint computation. This enables efficient straight-line navigation with
+            reactive obstacle avoidance and path replanning.
+          </p>
+
+          <h4>Path Planning Strategy</h4>
+          <ol>
+            <li><strong>Initial Planning:</strong> Linear interpolation generates direct waypoints from current position to goal</li>
+            <li><strong>Waypoint Discretization:</strong> Bresenham's algorithm converts continuous path to discrete grid points</li>
+            <li><strong>Reactive Replanning:</strong> When obstacles detected, execute dodge maneuver and recompute path to goal</li>
+            <li><strong>Path Preservation:</strong> Balanced maneuvers ensure return to original trajectory after avoidance</li>
+          </ol>
+
+          <figure>
+            <img src="assets/images/tello-pipeline.svg" alt="Tello Navigation Pipeline" style="max-width: 100%;">
+          </figure>
+
+          <h4>Linear Interpolation (Direct Path)</h4>
+          <p>Generates straight-line waypoints from start to goal:</p>
+          <div class="equation-display">
+            $$
+            \begin{align}
+            \mathbf{p}(t) &= (1-t) \cdot \mathbf{p}_{start} + t \cdot \mathbf{p}_{goal} \\
+            t &\in [0, 1]
+            \end{align}
+            $$
+          </div>
+          <p>Where $\mathbf{p}(t) = (x(t), y(t))$ is position along the path.</p>
+
+          <h4>Bresenham's Algorithm (Discrete Waypoints)</h4>
+          <p>
+            Converts continuous linear path to discrete integer grid points using only integer arithmetic (no floating-point operations).
+            This is critical for waypoint-based navigation on the Tello's command interface.
+          </p>
+
+          <p>Given start $(x_0, y_0)$ and end $(x_1, y_1)$:</p>
+
+          <ol>
+            <li>Calculate deltas: $dx = |x_1 - x_0|$, $dy = |y_1 - y_0|$</li>
+            <li>Determine step direction: $s_x = \text{sign}(x_1 - x_0)$, $s_y = \text{sign}(y_1 - y_0)$</li>
+            <li>Initialize error: $err = dx - dy$</li>
+            <li>Iterate until reaching end point</li>
+          </ol>
+
+          <h4>Pseudocode</h4>
+          <pre><code>def bresenham_line(x0, y0, x1, y1):
+    points = []
+    dx = abs(x1 - x0)
+    dy = abs(y1 - y0)
+    sx = 1 if x0 &lt; x1 else -1
+    sy = 1 if y0 &lt; y1 else -1
+    err = dx - dy
+
+    x, y = x0, y0
+
+    while True:
+        points.append((x, y))
+
+        if x == x1 and y == y1:
+            break
+
+        e2 = 2 * err
+
+        if e2 &gt; -dy:
+            err -= dy
+            x += sx
+
+        if e2 &lt; dx:
+            err += dx
+            y += sy
+
+    return points</code></pre>
+
+          <h4>Example: (0,0) → (5,3)</h4>
+          <p>Step-by-step execution:</p>
+          <pre><code>Initial: dx=5, dy=3, sx=1, sy=1, err=2
+
+Iteration 1: (0,0), e2=4, step x → (1,0), err=-1
+Iteration 2: (1,0), e2=-2, step y → (1,1), err=4
+Iteration 3: (1,1), e2=8, step x → (2,1), err=1
+Iteration 4: (2,1), e2=2, step x → (3,1), err=-2
+Iteration 5: (3,1), e2=-4, step y → (3,2), err=3
+Iteration 6: (3,2), e2=6, step x → (4,2), err=0
+Iteration 7: (4,2), e2=0, step x → (5,2), err=-3
+Iteration 8: (5,2), e2=-6, step y → (5,3), done</code></pre>
+
+          <p><strong>Output:</strong> [(0,0), (1,0), (1,1), (2,1), (3,1), (3,2), (4,2), (5,2), (5,3)]</p>
+
+          <h4>Visualization</h4>
+          <pre><code>3 |           ●
+2 |       ● ● ●
+1 | ● ● ● ●
+0 | ●
+  +-------------
+    0 1 2 3 4 5</code></pre>
+
+          <h4>Reactive Replanning</h4>
+          <p>When obstacle is detected during flight:</p>
+          <ol>
+            <li><strong>Detect:</strong> YOLOv8 identifies obstacle + threat level</li>
+            <li><strong>Dodge:</strong> Execute lateral or vertical balanced maneuver</li>
+            <li><strong>Recompute:</strong> Linear interpolation from new position to goal</li>
+            <li><strong>Discretize:</strong> Bresenham converts new path to waypoints</li>
+            <li><strong>Continue:</strong> Resume navigation on updated path</li>
+          </ol>
+
+          <h4>Benefits of Hybrid Approach</h4>
+          <ul>
+            <li>✓ <strong>Efficiency:</strong> Straight-line paths minimize flight time and battery usage</li>
+            <li>✓ <strong>Simplicity:</strong> Linear interpolation is fast ($O(1)$ planning time)</li>
+            <li>✓ <strong>Precision:</strong> Bresenham provides optimal discrete approximation</li>
+            <li>✓ <strong>Reactive:</strong> Can replan path in real-time when obstacles appear</li>
+            <li>✓ <strong>Integer-only:</strong> No floating-point errors in waypoint generation</li>
+            <li>✓ <strong>Deterministic:</strong> Same inputs always produce same waypoints</li>
+          </ul>
+
+          <h4>Complexity Analysis</h4>
+          <ul>
+            <li><strong>Linear Interpolation:</strong> $O(1)$ - constant time</li>
+            <li><strong>Bresenham:</strong> $O(\max(dx, dy))$ - linear in distance</li>
+            <li><strong>Total Path Generation:</strong> $O(\max(dx, dy))$</li>
+            <li><strong>Replanning:</strong> Same as initial planning (very fast)</li>
+          </ul>
+
+          <p><strong>Code:</strong> See <code>Tello/obstacle_avoidance/path_planner.py</code></p>
+        </section>
+      </section>
+
+      <!-- Section 3: Key Equations Summary -->
+      <section id="equations" class="section">
+        <h2 class="section-title">3. Key Equations Summary</h2>
+
+        <h3>Distance Estimation (Pinhole Camera)</h3>
+        <div class="equation-display">
+          $$
+          d = \frac{H \times f}{h}
+          $$
+        </div>
+
+        <h3>PID Control</h3>
+        <div class="equation-display">
+          $$
+          u(t) = K_p \cdot e(t) + K_i \cdot \int e(t) dt + K_d \cdot \frac{de(t)}{dt}
+          $$
+        </div>
+
+        <h3>Dead Reckoning (Forward Motion)</h3>
+        <div class="equation-display">
+          $$
+          \begin{align}
+          x' &= x + d \cdot \cos(\psi \cdot \pi/180) \\
+          y' &= y + d \cdot \sin(\psi \cdot \pi/180)
+          \end{align}
+          $$
+        </div>
+
+        <h3>Bresenham Error Update</h3>
+        <div class="equation-display">
+          $$
+          \text{err} = dx - dy
+          $$
+        </div>
+
+        <h3>Transform Rotation Matrix</h3>
+        <div class="equation-display">
+          $$
+          \begin{bmatrix} x' \\ y' \end{bmatrix} =
+          \begin{bmatrix}
+          \cos(\psi) & -\sin(\psi) \\
+          \sin(\psi) & \cos(\psi)
+          \end{bmatrix}
+          \begin{bmatrix} x \\ y \end{bmatrix}
+          $$
+        </div>
+
+        <h3>ArUco Pose (PnP)</h3>
+        <div class="equation-display">
+          $$
+          \begin{bmatrix} R & t \\ 0 & 1 \end{bmatrix} = \text{solvePnP}(M, P, K, D)
+          $$
+        </div>
+      </section>
+
+      <!-- Section 4: System Integration -->
+      <section id="integration" class="section">
+        <h2 class="section-title">4. System Integration & Data Flow</h2>
+
+        <h3>Overall System Architecture</h3>
+        <pre><code>┌─────────────────────────────────────────────────────────┐
+│                     PERCEPTION LAYER                    │
+├─────────────────────┬───────────────────────────────────┤
+│   AR Drone          │         Tello Drone               │
+│   - ArUco Detection │   - YOLOv8 Detection              │
+│   - Camera Frames   │   - Distance Estimation           │
+│                     │   - Threat Assessment             │
+└─────────────────────┴───────────────────────────────────┘
+           │                           │
+           ▼                           ▼
+┌─────────────────────────────────────────────────────────┐
+│                     PLANNING LAYER                      │
+├─────────────────────┬───────────────────────────────────┤
+│   AR Drone          │         Tello Drone               │
+│   - Grid Search     │   - Waypoint Following            │
+│   - Transform Calc  │   - Obstacle Circumvention        │
+│                     │   - Bresenham Pathing             │
+└─────────────────────┴───────────────────────────────────┘
+           │                           │
+           ▼                           ▼
+┌─────────────────────────────────────────────────────────┐
+│                     CONTROL LAYER                       │
+├─────────────────────┬───────────────────────────────────┤
+│   AR Drone          │         Tello Drone               │
+│   - Optical Center  │   - PID Controller                │
+│   - IMU Centering   │   - Dead Reckoning                │
+│   - Velocity Ctrl   │   - Position Estimator            │
+└─────────────────────┴───────────────────────────────────┘
+           │                           │
+           ▼                           ▼
+┌─────────────────────────────────────────────────────────┐
+│                   COMMUNICATION LAYER                   │
+│         Transform Data Exchange (WiFi/Network)          │
+└─────────────────────────────────────────────────────────┘</code></pre>
+
+        <h3>AR Drone Pipeline</h3>
+        <p>Camera → ArUco Detection → Transform Computation → Grid Search → Optical Centering → Navigation Commands</p>
+
+        <h3>Tello Drone Pipeline</h3>
+        <p>Camera → YOLOv8 → Distance Estimation → Threat Assessment → Obstacle Avoidance → Dead Reckoning → PID Control → Precision Landing</p>
+
+        <h3>Multi-Agent Coordination</h3>
+        <ol>
+          <li>AR Drone performs grid search at high altitude</li>
+          <li>Detects ArUco Marker 0 (origin) and Marker 1 (target)</li>
+          <li>Computes transform: body frame → world frame</li>
+          <li>Communicates target coordinates to Tello Drone</li>
+          <li>Tello Drone navigates to target using waypoints</li>
+          <li>Real-time obstacle detection and avoidance</li>
+          <li>PID-controlled precision landing at target (±10cm)</li>
+        </ol>
+      </section>
+
+      <!-- Additional Resources -->
+      <section class="section">
+        <div class="highlight-box">
+          <h3>Explore More</h3>
+          <p>
+            For more information about this project:
+          </p>
+          <ul>
+            <li><a href="design-choices.html"><strong>Design Choices</strong></a> - Architectural decisions and trade-offs</li>
+            <li><a href="code-snippets.html"><strong>Code Snippets</strong></a> - Key implementation examples</li>
+            <li><a href="index.html"><strong>Home</strong></a> - Project overview and results</li>
+          </ul>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <p>&copy; 2025 Team 14 | UC Berkeley EECS/ME 106a</p>
+    <p>Agni Rajinikanth, Alan Bao, Nohl Abdelhadi, Imam Majed Alayeh</p>
+  </footer>
+
+  <!-- Back to Top Button -->
+  <a href="#" class="back-to-top" aria-label="Back to top">↑</a>
+
+  <!-- JavaScript -->
+  <script src="js/navigation.js"></script>
+</body>
+</html>
