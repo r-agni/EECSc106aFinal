@@ -90,6 +90,38 @@
     <section class="section">
       <h2 class="section-title">1. Introduction</h2>
 
+      <h3 class="subsection-title">End Goal</h3>
+      <p>
+        The end goal of this project is to develop a fully autonomous cooperative two-drone system capable of executing humanitarian missions
+        in complex environments. The system enables a high-altitude scout drone (AR Drone) to identify optimal paths and target locations,
+        while a low-altitude delivery drone (Tello) navigates obstacles and delivers payloads with precision (±10cm accuracy). This cooperative
+        approach combines the strengths of different UAV platforms to achieve safer, more efficient mission completion than single-drone systems.
+      </p>
+
+      <h3 class="subsection-title">Why This Is Interesting</h3>
+      <p>
+        This project addresses several challenging robotics problems:
+      </p>
+      <ul>
+        <li><strong>Multi-agent coordination:</strong> Synchronizing two heterogeneous drones with different capabilities, sensor suites, and flight characteristics</li>
+        <li><strong>Real-time computer vision:</strong> Implementing YOLOv8 object detection and ArUco marker tracking on resource-constrained platforms</li>
+        <li><strong>Precision landing with limited sensors:</strong> Achieving ±10cm landing accuracy using only monocular camera data and pinhole camera distance estimation</li>
+        <li><strong>Transform synchronization:</strong> Computing and communicating body-to-world frame transformations between drones for coordinated navigation</li>
+        <li><strong>Heterogeneous platform integration:</strong> Bridging the capabilities of commercial drones (AR Drone 2.0 and DJI Tello) with different APIs, sensor configurations, and flight controllers</li>
+      </ul>
+
+      <h3 class="subsection-title">Real-World Applications</h3>
+      <p>
+        The techniques developed in this project have broad applicability to real-world robotics challenges:
+      </p>
+      <ul>
+        <li><strong>Disaster relief and search-and-rescue:</strong> Delivering medical supplies, water, or communication equipment to survivors in collapsed buildings or hazardous terrain</li>
+        <li><strong>Remote medical delivery:</strong> Transporting medications, vaccines, or blood samples to isolated communities or field hospitals</li>
+        <li><strong>Environmental monitoring:</strong> Cooperative wildlife tracking, habitat surveying, and ecosystem health assessment over large areas</li>
+        <li><strong>Agricultural operations:</strong> Precision crop monitoring with high-altitude surveying and low-altitude targeted pesticide or fertilizer delivery</li>
+        <li><strong>Infrastructure inspection:</strong> Bridge, power line, and building inspections using scout drones for path planning and specialized drones for close-range detailed analysis</li>
+      </ul>
+
       <h3 class="subsection-title">Problem Statement</h3>
       <p>
         Humanitarian missions in disaster zones, remote areas, and search-and-rescue operations require autonomous aerial systems that can
